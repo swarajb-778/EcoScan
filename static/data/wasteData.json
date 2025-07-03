@@ -1,0 +1,160 @@
+{
+  "classifications": {
+    "bottle": {
+      "category": "recycle",
+      "confidence": 0.95,
+      "instructions": "Remove cap and label if possible",
+      "tips": "Rinse container to remove food residue",
+      "color": "#22c55e"
+    },
+    "apple": {
+      "category": "compost",
+      "confidence": 0.9,
+      "instructions": "Remove any stickers",
+      "tips": "Can be composted whole",
+      "color": "#84cc16"
+    },
+    "banana": {
+      "category": "compost",
+      "confidence": 0.9,
+      "instructions": "Remove any produce stickers",
+      "tips": "Banana peels break down quickly",
+      "color": "#84cc16"
+    },
+    "cup": {
+      "category": "recycle",
+      "confidence": 0.8,
+      "instructions": "Check if plastic or paper - recycle accordingly",
+      "tips": "Remove any plastic lids separately",
+      "color": "#22c55e"
+    },
+    "cell phone": {
+      "category": "landfill",
+      "confidence": 0.95,
+      "instructions": "Take to electronic waste center",
+      "tips": "Contains hazardous materials - special disposal required",
+      "color": "#ef4444"
+    },
+    "laptop": {
+      "category": "landfill",
+      "confidence": 0.95,
+      "instructions": "Electronic waste - special disposal required",
+      "tips": "Remove personal data before disposal",
+      "color": "#ef4444"
+    },
+    "keyboard": {
+      "category": "landfill",
+      "confidence": 0.9,
+      "instructions": "Electronic waste facility",
+      "tips": "Check for battery removal first",
+      "color": "#ef4444"
+    },
+    "mouse": {
+      "category": "landfill",
+      "confidence": 0.9,
+      "instructions": "Electronic waste facility",
+      "tips": "Remove batteries if wireless",
+      "color": "#ef4444"
+    },
+    "orange": {
+      "category": "compost",
+      "confidence": 0.9,
+      "instructions": "Remove any stickers",
+      "tips": "Citrus peels are excellent for compost",
+      "color": "#84cc16"
+    },
+    "bowl": {
+      "category": "recycle",
+      "confidence": 0.7,
+      "instructions": "Check material - ceramic goes to landfill, metal/plastic recycles",
+      "tips": "Clean thoroughly before recycling",
+      "color": "#22c55e"
+    },
+    "scissors": {
+      "category": "landfill",
+      "confidence": 0.8,
+      "instructions": "Metal recycling or household hazardous waste",
+      "tips": "Sharp objects need special handling",
+      "color": "#ef4444"
+    },
+    "book": {
+      "category": "recycle",
+      "confidence": 0.9,
+      "instructions": "Remove any plastic covers first",
+      "tips": "Consider donating if in good condition",
+      "color": "#22c55e"
+    },
+    "sandwich": {
+      "category": "compost",
+      "confidence": 0.8,
+      "instructions": "Remove any packaging first",
+      "tips": "Food scraps compost quickly",
+      "color": "#84cc16"
+    },
+    "pizza": {
+      "category": "compost",
+      "confidence": 0.8,
+      "instructions": "Food waste only - remove boxes separately",
+      "tips": "Greasy food waste is still compostable",
+      "color": "#84cc16"
+    },
+    "wine glass": {
+      "category": "recycle",
+      "confidence": 0.85,
+      "instructions": "Glass recycling bin",
+      "tips": "Remove any metal or plastic components",
+      "color": "#22c55e"
+    },
+    "toothbrush": {
+      "category": "landfill",
+      "confidence": 0.9,
+      "instructions": "Regular trash",
+      "tips": "Look for special recycling programs for oral care",
+      "color": "#ef4444"
+    },
+    "suitcase": {
+      "category": "landfill",
+      "confidence": 0.8,
+      "instructions": "Donation or bulky waste pickup",
+      "tips": "Consider repair or donation first",
+      "color": "#ef4444"
+    },
+    "handbag": {
+      "category": "landfill",
+      "confidence": 0.8,
+      "instructions": "Donation or textile recycling",
+      "tips": "Check for textile recycling programs",
+      "color": "#ef4444"
+    },
+    "carrot": {
+      "category": "compost",
+      "confidence": 0.9,
+      "instructions": "Include tops and peels",
+      "tips": "Root vegetables compost well",
+      "color": "#84cc16"
+    },
+    "broccoli": {
+      "category": "compost",
+      "confidence": 0.9,
+      "instructions": "Stems and leaves can be composted",
+      "tips": "All parts of broccoli are compostable",
+      "color": "#84cc16"
+    }
+  },
+  "keywords": {
+    "plastic": ["bottle", "cup", "container"],
+    "glass": ["bottle", "wine glass", "jar"],
+    "food": ["apple", "banana", "orange", "sandwich", "pizza", "carrot", "broccoli"],
+    "electronics": ["cell phone", "laptop", "keyboard", "mouse"],
+    "metal": ["can", "scissors", "fork", "spoon"],
+    "paper": ["book", "newspaper", "magazine"],
+    "organic": ["apple", "banana", "orange", "carrot", "broccoli"],
+    "container": ["bottle", "cup", "bowl", "jar"],
+    "fruit": ["apple", "banana", "orange"],
+    "vegetable": ["carrot", "broccoli"],
+    "device": ["cell phone", "laptop", "keyboard", "mouse"],
+    "utensil": ["fork", "spoon", "knife", "scissors"],
+    "clothing": ["handbag", "suitcase"],
+    "personal": ["toothbrush", "handbag"]
+  }
+} 
