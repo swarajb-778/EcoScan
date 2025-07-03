@@ -17,13 +17,15 @@ export class WasteClassifier {
       this.classificationData = await response.json();
       
       // Initialize fuzzy search for keyword matching
-      const keywords = Object.keys(this.classificationData.keywords);
-      this.fuse = new Fuse(keywords, {
+      if (this.classificationData) {
+        const keywords = Object.keys(this.classificationData.keywords);
+        this.fuse = new Fuse(keywords, {
         threshold: 0.4, // 60% similarity required
         distance: 100,
         minMatchCharLength: 2,
         keys: ['']
-      });
+        });
+      }
       
       this.isInitialized = true;
       console.log('🗃️ Waste classification database loaded');

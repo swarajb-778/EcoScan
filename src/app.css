@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom component styles */
+@layer components {
+  .detection-box {
+    @apply absolute border-2 border-opacity-80 bg-opacity-20 backdrop-blur-sm rounded-lg cursor-pointer transition-all duration-200;
+  }
+  
+  .detection-box.recycle {
+    @apply border-green-500 bg-green-500;
+  }
+  
+  .detection-box.compost {
+    @apply border-lime-500 bg-lime-500;
+  }
+  
+  .detection-box.landfill {
+    @apply border-red-500 bg-red-500;
+  }
+  
+  .detection-box:hover {
+    @apply border-opacity-100 bg-opacity-30 scale-105;
+  }
+  
+  .glass-effect {
+    @apply bg-opacity-20 backdrop-blur-md border border-white border-opacity-20;
+  }
+  
+  .btn-primary {
+    @apply bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-105;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-3 px-6 rounded-xl shadow-md transition-all duration-200;
+  }
+  
+  .card {
+    @apply bg-white rounded-2xl shadow-xl p-6 transition-all duration-200 hover:shadow-2xl;
+  }
+  
+  .floating-action {
+    @apply fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all duration-200 hover:scale-110 z-50;
+  }
+}
+
+/* Dark mode styles */
+.dark .card {
+  @apply bg-gray-800 text-white;
+}
+
+.dark .btn-secondary {
+  @apply bg-gray-700 hover:bg-gray-600 text-gray-200;
+}
+
+/* Animation keyframes */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.33);
+    opacity: 1;
+  }
+  80%, 100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes bounce-in {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+
+.bounce-in {
+  animation: bounce-in 0.6s ease-out;
+}
+
+/* Camera view specific styles */
+.camera-view {
+  @apply relative w-full h-full overflow-hidden rounded-2xl;
+}
+
+.camera-overlay {
+  @apply absolute inset-0 flex items-center justify-center pointer-events-none;
+}
+
+.detection-label {
+  @apply bg-black bg-opacity-70 text-white text-sm px-2 py-1 rounded-md font-medium;
+}
+
+/* Voice input styles */
+.voice-indicator {
+  @apply w-4 h-4 bg-red-500 rounded-full animate-pulse;
+}
+
+.voice-waveform {
+  @apply flex items-center space-x-1;
+}
+
+.wave-bar {
+  @apply w-1 bg-blue-500 rounded-full animate-bounce;
+}
+
+/* Results panel styles */
+.result-card {
+  @apply bg-gradient-to-br p-4 rounded-xl text-white shadow-lg transform transition-all duration-200 hover:scale-105;
+}
+
+.result-card.recycle {
+  @apply from-green-500 to-emerald-600;
+}
+
+.result-card.compost {
+  @apply from-lime-500 to-green-600;
+}
+
+.result-card.landfill {
+  @apply from-red-500 to-pink-600;
+}
+
+/* Loading states */
+.loading-spinner {
+  @apply animate-spin rounded-full border-4 border-gray-300 border-t-blue-600;
+}
+
+.skeleton {
+  @apply animate-pulse bg-gray-300 rounded;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .floating-action {
+    @apply bottom-4 right-4 w-14 h-14 text-xl;
+  }
+  
+  .detection-box {
+    @apply border;
+  }
+  
+  .detection-label {
+    @apply text-xs px-1 py-0.5;
+  }
+}
+
+/* High contrast mode for accessibility */
+@media (prefers-contrast: high) {
+  .detection-box {
+    @apply border-4;
+  }
+  
+  .detection-label {
+    @apply bg-black text-white;
+  }
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .detection-box,
+  .btn-primary,
+  .btn-secondary,
+  .floating-action {
+    @apply transition-none;
+  }
+  
+  .loading-spinner,
+  .voice-indicator,
+  .wave-bar {
+    @apply animate-none;
+  }
+} 

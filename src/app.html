@@ -1,12 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="%sveltekit.theme%">
 	<head>
 		<meta charset="utf-8" />
-		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+		<meta name="description" content="EcoScan - AI-powered waste classification for better recycling" />
+		
+		<!-- PWA Meta Tags -->
+		<meta name="application-name" content="EcoScan" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="apple-mobile-web-app-title" content="EcoScan" />
+		<meta name="format-detection" content="telephone=no" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="theme-color" content="#22c55e" />
+		
+		<!-- Open Graph / Social Media -->
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content="EcoScan - AI Waste Classification" />
+		<meta property="og:description" content="Real-time object detection and waste classification in your browser" />
+		<meta property="og:site_name" content="EcoScan" />
+		<meta property="og:url" content="https://ecoscan.vercel.app" />
+		
+		<!-- Security headers -->
+		<meta http-equiv="X-Content-Type-Options" content="nosniff" />
+		<meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin" />
+		
+		<title>EcoScan - AI Waste Classification</title>
+		
 		%sveltekit.head%
 	</head>
-	<body data-sveltekit-preload-data="hover">
+	<body data-sveltekit-preload-data="hover" class="bg-gray-50 min-h-screen">
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>
