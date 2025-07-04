@@ -60,6 +60,9 @@
   </header>
 
   <!-- Error Toast -->
+  <div aria-live="assertive" class="sr-only">
+    {$errorMessage}
+  </div>
   {#if $errorMessage}
     <div class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bounce-in">
       <div class="bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2">
