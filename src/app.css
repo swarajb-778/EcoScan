@@ -181,12 +181,4 @@
   .wave-bar {
     @apply animate-none;
   }
-}
-
-.btn-primary:focus, .btn-secondary:focus {
-  @apply ring-2 ring-offset-2 ring-green-400 outline-none;
-}
-
-[tabindex]:focus, button:focus, a:focus {
-  @apply ring-2 ring-blue-400 outline-none;
 } 
