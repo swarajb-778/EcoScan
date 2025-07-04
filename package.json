@@ -1,33 +1,128 @@
 {
 	"name": "ecoscan",
-	"private": true,
-	"version": "0.0.1",
-	"type": "module",
+	"version": "1.0.0",
+	"description": "AI-powered waste classification using computer vision and voice recognition",
+	"keywords": [
+		"ai",
+		"machine-learning",
+		"waste-sorting",
+		"recycling",
+		"computer-vision",
+		"pwa",
+		"svelte",
+		"typescript",
+		"sustainability",
+		"environment"
+	],
+	"author": {
+		"name": "EcoScan Team",
+		"email": "team@ecoscan.app",
+		"url": "https://ecoscan.app"
+	},
+	"license": "MIT",
+	"homepage": "https://ecoscan.app",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yourusername/ecoscan.git"
+	},
+	"bugs": {
+		"url": "https://github.com/yourusername/ecoscan/issues"
+	},
+	"private": false,
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
-	},
-	"devDependencies": {
-		"@sveltejs/adapter-auto": "^6.0.0",
-		"@sveltejs/kit": "^2.16.0",
-		"@sveltejs/vite-plugin-svelte": "^5.0.0",
-		"@tailwindcss/typography": "^0.5.16",
-		"@vite-pwa/sveltekit": "^1.0.0",
-		"autoprefixer": "^10.4.21",
-		"daisyui": "^5.0.43",
-		"postcss": "^8.5.6",
-		"svelte": "^5.0.0",
-		"svelte-check": "^4.0.0",
-		"tailwindcss": "^4.1.11",
-		"typescript": "^5.0.0",
-		"vite": "^6.2.6"
+		"test": "vitest",
+		"test:watch": "vitest --watch",
+		"test:ui": "vitest --ui",
+		"test:coverage": "vitest run --coverage",
+		"test:e2e": "playwright test",
+		"test:e2e:ui": "playwright test --ui",
+		"lint": "prettier --check . && eslint .",
+		"lint:fix": "prettier --write . && eslint . --fix",
+		"format": "prettier --write .",
+		"type-check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"setup": "bash scripts/setup.sh",
+		"setup:model": "python3 scripts/download-model.py",
+		"setup:env": "cp .env.example .env",
+		"clean": "rm -rf .svelte-kit build dist node_modules/.vite",
+		"clean:deps": "rm -rf node_modules package-lock.json && npm install",
+		"analyze": "npm run build && npx bundle-analyzer build",
+		"security:audit": "npm audit --audit-level=moderate",
+		"security:fix": "npm audit fix",
+		"prepare": "husky install",
+		"pre-commit": "lint-staged",
+		"validate": "npm run type-check && npm run lint && npm run test",
+		"release": "npm run validate && npm run build && npm version",
+		"deploy:vercel": "vercel --prod",
+		"deploy:netlify": "netlify deploy --prod",
+		"docs:serve": "http-server docs -p 8080",
+		"perf:lighthouse": "lighthouse http://localhost:4173 --output html --output-path ./lighthouse-report.html",
+		"perf:bundle": "npx webpack-bundle-analyzer build/static/js/*.js",
+		"backup": "tar -czf backup-$(date +%Y%m%d).tar.gz src static docs package.json"
 	},
 	"dependencies": {
-		"fuse.js": "^7.1.0",
-		"onnxruntime-web": "^1.22.0"
-	}
+		"@sveltejs/adapter-auto": "^3.0.0",
+		"@sveltejs/kit": "^2.0.0",
+		"@sveltejs/vite-plugin-svelte": "^3.0.0",
+		"@vite-pwa/sveltekit": "^0.4.0",
+		"fuse.js": "^7.0.0",
+		"onnxruntime-web": "^1.16.0",
+		"svelte": "^4.2.7",
+		"vite": "^5.0.3"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.28.0",
+		"@sveltejs/adapter-static": "^3.0.0",
+		"@tailwindcss/typography": "^0.5.10",
+		"@testing-library/jest-dom": "^6.1.0",
+		"@testing-library/svelte": "^4.0.0",
+		"@types/node": "^20.0.0",
+		"@typescript-eslint/eslint-plugin": "^6.0.0",
+		"@typescript-eslint/parser": "^6.0.0",
+		"@vitest/coverage-v8": "^1.0.0",
+		"@vitest/ui": "^1.0.0",
+		"autoprefixer": "^10.4.16",
+		"daisyui": "^4.4.0",
+		"eslint": "^8.28.0",
+		"eslint-config-prettier": "^9.0.0",
+		"eslint-plugin-svelte": "^2.30.0",
+		"happy-dom": "^12.0.0",
+		"husky": "^8.0.0",
+		"jsdom": "^23.0.0",
+		"lint-staged": "^15.0.0",
+		"postcss": "^8.4.31",
+		"prettier": "^3.0.0",
+		"prettier-plugin-svelte": "^3.0.0",
+		"svelte-check": "^3.6.0",
+		"tailwindcss": "^3.3.6",
+		"typescript": "^5.0.0",
+		"vite-plugin-pwa": "^0.17.0",
+		"vitest": "^1.0.0"
+	},
+	"engines": {
+		"node": ">=18.0.0",
+		"npm": ">=8.0.0"
+	},
+	"browserslist": [
+		"> 1%",
+		"last 2 versions",
+		"not dead",
+		"not ie 11"
+	],
+	"lint-staged": {
+		"*.{js,ts,svelte}": [
+			"eslint --fix",
+			"prettier --write"
+		],
+		"*.{json,md,css,html}": [
+			"prettier --write"
+		]
+	},
+	"funding": {
+		"type": "github",
+		"url": "https://github.com/sponsors/yourusername"
+	},
+	"type": "module"
 }
