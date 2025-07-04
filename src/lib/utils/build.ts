@@ -13,7 +13,7 @@ export async function lazyLoad<T>(
   fallback?: T,
   retries = 3
 ): Promise<T> {
-  let lastError: Error;
+  let lastError: Error | undefined;
 
   for (let i = 0; i < retries; i++) {
     try {
@@ -33,7 +33,7 @@ export async function lazyLoad<T>(
     return fallback;
   }
 
-  throw lastError!;
+  throw lastError || new Error('Failed to load module');
 }
 
 /**
@@ -188,13 +188,14 @@ export function analyzeBundleSize(): void {
   });
   
   styles.forEach(link => {
-    if (link.href) {
-      fetch(link.href, { method: 'HEAD' })
+    const linkElement = link as HTMLLinkElement;
+    if (linkElement.href) {
+      fetch(linkElement.href, { method: 'HEAD' })
         .then(response => {
           const size = response.headers.get('content-length');
           if (size) {
             const kb = Math.round(parseInt(size) / 1024);
-            console.log(`CSS: ${link.href.split('/').pop()} - ${kb}KB`);
+            console.log(`CSS: ${linkElement.href.split('/').pop()} - ${kb}KB`);
           }
         })
         .catch(() => {});
