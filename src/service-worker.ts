@@ -124,10 +124,12 @@ self.addEventListener('fetch', (event) => {
         
         // Return offline fallback for navigation requests
         if (request.mode === 'navigate') {
-          return caches.match('/') || new Response('Offline', {
-            status: 503,
-            statusText: 'Service Unavailable'
-          });
+          return caches.match('/').then(offline => 
+            offline || new Response('Offline', {
+              status: 503,
+              statusText: 'Service Unavailable'
+            })
+          );
         }
         
         throw error;
@@ -137,7 +139,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Background sync for analytics/metrics
-self.addEventListener('sync', (event) => {
+self.addEventListener('sync', (event: any) => {
   if (event.tag === 'background-metrics') {
     event.waitUntil(syncMetrics());
   }
