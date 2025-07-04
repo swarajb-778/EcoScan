@@ -81,12 +81,12 @@ export class MockObjectDetector {
     
     for (let i = 0; i < numDetections; i++) {
       const detection: Detection = {
-        bbox: {
-          x: Math.random() * (imageData.width - 100),
-          y: Math.random() * (imageData.height - 100),
-          width: 50 + Math.random() * 100,
-          height: 50 + Math.random() * 100
-        },
+        bbox: [
+          Math.random() * (imageData.width - 100),
+          Math.random() * (imageData.height - 100),
+          50 + Math.random() * 100,
+          50 + Math.random() * 100
+        ],
         confidence: 0.5 + Math.random() * 0.5,
         class: this.getRandomClass(),
         classId: i
@@ -132,7 +132,7 @@ export class MockWasteClassifier {
         confidence: 0.7 + Math.random() * 0.3,
         instructions: this.getRandomInstructions(),
         tips: ['This is a mock classification for testing'],
-        keywordMatches: query ? [query.toLowerCase()] : ['mock']
+        keywordMatches: query ? query.toLowerCase() : 'mock'
       }
     ];
 
@@ -213,7 +213,7 @@ export class PerformanceTester {
   generateReport(): string {
     const stats = this.getAllStats();
     let report = '📊 Performance Test Report\n';
-    report += '=' * 40 + '\n\n';
+         report += '='.repeat(40) + '\n\n';
     
     Object.entries(stats).forEach(([name, stat]) => {
       if (stat) {
@@ -241,12 +241,12 @@ export class TestDataGenerator {
     
     for (let i = 0; i < count; i++) {
       detections.push({
-        bbox: {
-          x: Math.random() * 500,
-          y: Math.random() * 400,
-          width: 50 + Math.random() * 100,
-          height: 50 + Math.random() * 100
-        },
+        bbox: [
+          Math.random() * 500,
+          Math.random() * 400,
+          50 + Math.random() * 100,
+          50 + Math.random() * 100
+        ],
         confidence: 0.5 + Math.random() * 0.5,
         class: `class_${i}`,
         classId: i
@@ -283,7 +283,7 @@ export class TestDataGenerator {
         confidence: 0.95,
         instructions: 'Remove cap and label, rinse clean',
         tips: ['Crush to save space', 'Check recycling number'],
-        keywordMatches: ['bottle', 'plastic']
+        keywordMatches: 'bottle plastic'
       },
       {
         id: 'test-banana',
@@ -292,7 +292,7 @@ export class TestDataGenerator {
         confidence: 0.88,
         instructions: 'Add to compost bin',
         tips: ['Great for composting', 'Rich in potassium'],
-        keywordMatches: ['banana', 'peel', 'fruit']
+        keywordMatches: 'banana peel fruit'
       },
       {
         id: 'test-battery',
@@ -301,7 +301,7 @@ export class TestDataGenerator {
         confidence: 0.92,
         instructions: 'Take to special battery recycling center',
         tips: ['Never put in regular trash', 'Contains hazardous materials'],
-        keywordMatches: ['battery', 'aa', 'alkaline']
+        keywordMatches: 'battery aa alkaline'
       }
     ];
   }
