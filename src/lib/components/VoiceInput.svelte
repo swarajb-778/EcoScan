@@ -27,7 +27,21 @@
     
     if (!SpeechRecognition) {
       voiceSupported.set(false);
-      setError('Voice recognition not supported in this browser');
+      setError('Voice recognition not supported in this browser.');
+      return;
+    }
+
+    // Check for microphone
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Microphone access is not supported in this browser.');
+      voiceSupported.set(false);
+      return;
+    }
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter(d => d.kind === 'audioinput');
+    if (audioInputs.length === 0) {
+      setError('No microphone device found. Please connect a microphone and try again.');
+      voiceSupported.set(false);
       return;
     }
 
@@ -67,6 +81,16 @@
     recognition.onend = () => {
       isListening.set(false);
       console.log('🎤 Voice recognition ended');
+    };
+
+    recognition.onspeechend = () => {
+      if (!$lastTranscript) {
+        setError('No speech detected. Please try speaking more clearly.');
+      }
+    };
+
+    recognition.onnomatch = () => {
+      setError('Could not recognize speech. Try again or use text input.');
     };
   }
 
