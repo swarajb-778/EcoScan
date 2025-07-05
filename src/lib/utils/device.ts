@@ -1,252 +1,659 @@
 /**
- * Device detection and capability utilities
- * Helps optimize the app for different devices and contexts
+ * Device detection and capability utilities for EcoScan
+ * Detects device features, capabilities, and optimizes experience
  */
 
+/**
+ * Device information interface
+ */
 export interface DeviceInfo {
-  isMobile: boolean;
-  isTablet: boolean;
-  isDesktop: boolean;
-  hasTouch: boolean;
-  supportsWebGL: boolean;
-  supportsWebRTC: boolean;
-  supportsWebSpeech: boolean;
-  supportsWebAssembly: boolean;
-  orientation: 'portrait' | 'landscape';
-  pixelRatio: number;
-  screenSize: 'small' | 'medium' | 'large';
-  connectionSpeed: 'slow' | 'fast' | 'unknown';
+  type: 'mobile' | 'tablet' | 'desktop';
+  os: 'ios' | 'android' | 'windows' | 'macos' | 'linux' | 'unknown';
+  browser: 'chrome' | 'firefox' | 'safari' | 'edge' | 'unknown';
+  version: string;
+  capabilities: DeviceCapabilities;
+  performance: DevicePerformance;
 }
 
 /**
- * Detect current device capabilities
+ * Device capabilities interface
  */
-export function getDeviceInfo(): DeviceInfo {
-  const userAgent = navigator.userAgent.toLowerCase();
-  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  
-  // Screen size detection
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  const isMobile = width <= 768 || hasTouch && width <= 1024;
-  const isTablet = hasTouch && width > 768 && width <= 1024;
-  const isDesktop = !isMobile && !isTablet;
-  
-  // Orientation
-  const orientation = height > width ? 'portrait' : 'landscape';
-  
-  // Screen size categories
-  let screenSize: 'small' | 'medium' | 'large' = 'medium';
-  if (width <= 640) screenSize = 'small';
-  else if (width >= 1280) screenSize = 'large';
-  
-  // Connection speed (rough estimate)
-  let connectionSpeed: 'slow' | 'fast' | 'unknown' = 'unknown';
-  if ('connection' in navigator) {
-    const connection = (navigator as any).connection;
-    if (connection.effectiveType) {
-      connectionSpeed = ['slow-2g', '2g', '3g'].includes(connection.effectiveType) 
-        ? 'slow' : 'fast';
-    }
-  }
-  
-  return {
-    isMobile,
-    isTablet,
-    isDesktop,
-    hasTouch,
-    supportsWebGL: checkWebGLSupport(),
-    supportsWebRTC: checkWebRTCSupport(),
-    supportsWebSpeech: checkWebSpeechSupport(),
-    supportsWebAssembly: checkWebAssemblySupport(),
-    orientation,
-    pixelRatio: window.devicePixelRatio || 1,
-    screenSize,
-    connectionSpeed
+export interface DeviceCapabilities {
+  hasCamera: boolean;
+  hasMicrophone: boolean;
+  hasWebGL: boolean;
+  hasWebGL2: boolean;
+  hasWebRTC: boolean;
+  hasServiceWorker: boolean;
+  hasNotifications: boolean;
+  hasVibration: boolean;
+  hasGeolocation: boolean;
+  hasFullscreen: boolean;
+  hasClipboard: boolean;
+  hasTouchScreen: boolean;
+  hasAccelerometer: boolean;
+  hasGyroscope: boolean;
+  hasAmbientLight: boolean;
+  hasProximity: boolean;
+  hasBattery: boolean;
+  hasWebAssembly: boolean;
+  hasSharedArrayBuffer: boolean;
+  hasOffscreenCanvas: boolean;
+}
+
+/**
+ * Device performance interface
+ */
+export interface DevicePerformance {
+  cores: number;
+  memory: number; // in GB
+  tier: 'low' | 'medium' | 'high';
+  gpu: string;
+  maxTextureSize: number;
+  recommendedSettings: {
+    modelSize: 'small' | 'medium' | 'large';
+    inferenceFrequency: number; // ms
+    maxResolution: number;
+    enableOptimizations: boolean;
   };
 }
 
 /**
- * Check WebGL support for GPU acceleration
+ * Device detector class
  */
-export function checkWebGLSupport(): boolean {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    return !!gl;
-  } catch (e) {
-    return false;
-  }
-}
+export class DeviceDetector {
+  private cachedInfo?: DeviceInfo;
 
-/**
- * Check WebRTC support for camera access
- */
-export function checkWebRTCSupport(): boolean {
-  return !!(
-    navigator.mediaDevices &&
-    navigator.mediaDevices.getUserMedia &&
-    (
-      navigator.mediaDevices.getUserMedia ||
-      (navigator as any).webkitGetUserMedia ||
-      (navigator as any).mozGetUserMedia ||
-      (navigator as any).msGetUserMedia
-    )
-  );
-}
-
-/**
- * Check Web Speech API support
- */
-export function checkWebSpeechSupport(): boolean {
-  return !!(
-    window.SpeechRecognition ||
-    (window as any).webkitSpeechRecognition ||
-    (window as any).mozSpeechRecognition ||
-    (window as any).msSpeechRecognition
-  );
-}
-
-/**
- * Check WebAssembly support
- */
-export function checkWebAssemblySupport(): boolean {
-  try {
-    if (typeof WebAssembly === 'object' &&
-        typeof WebAssembly.instantiate === 'function') {
-      const module = new WebAssembly.Module(Uint8Array.of(0x0, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00));
-      if (module instanceof WebAssembly.Module) {
-        return new WebAssembly.Instance(module) instanceof WebAssembly.Instance;
-      }
+  /**
+   * Get comprehensive device information
+   */
+  async getDeviceInfo(): Promise<DeviceInfo> {
+    if (this.cachedInfo) {
+      return this.cachedInfo;
     }
-  } catch (e) {
-    // WebAssembly not supported
+
+    const info: DeviceInfo = {
+      type: this.getDeviceType(),
+      os: this.getOperatingSystem(),
+      browser: this.getBrowser(),
+      version: this.getBrowserVersion(),
+      capabilities: await this.getCapabilities(),
+      performance: await this.getPerformanceInfo()
+    };
+
+    this.cachedInfo = info;
+    return info;
   }
-  return false;
-}
 
-/**
- * Get camera constraints optimized for current device
- */
-export function getOptimalCameraConstraints(deviceInfo?: DeviceInfo): MediaStreamConstraints {
-  const info = deviceInfo || getDeviceInfo();
-  
-  // Base constraints
-  const constraints: MediaStreamConstraints = {
-    video: {
-      facingMode: 'environment', // Back camera preferred
-      width: { ideal: 640 },
-      height: { ideal: 480 }
-    },
-    audio: false
-  };
-
-  // Adjust for device capabilities
-  if (info.isMobile) {
-    // Mobile optimizations
-    if (info.screenSize === 'small') {
-      (constraints.video as MediaTrackConstraints).width = { ideal: 480 };
-      (constraints.video as MediaTrackConstraints).height = { ideal: 360 };
+  /**
+   * Detect device type
+   */
+  private getDeviceType(): 'mobile' | 'tablet' | 'desktop' {
+    const userAgent = navigator.userAgent.toLowerCase();
+    
+    // Check for mobile devices
+    if (/mobile|android|iphone|ipod|blackberry|windows phone/.test(userAgent)) {
+      return 'mobile';
     }
     
-    // Ensure back camera on mobile
-    (constraints.video as MediaTrackConstraints).facingMode = { ideal: 'environment' };
-  } else if (info.isDesktop) {
-    // Desktop can handle higher resolution
-    (constraints.video as MediaTrackConstraints).width = { ideal: 1280 };
-    (constraints.video as MediaTrackConstraints).height = { ideal: 720 };
+    // Check for tablets
+    if (/tablet|ipad|kindle|silk/.test(userAgent)) {
+      return 'tablet';
+    }
+    
+    // Check screen size as fallback
+    if (window.screen.width <= 768) {
+      return 'mobile';
+    } else if (window.screen.width <= 1024) {
+      return 'tablet';
+    }
+    
+    return 'desktop';
   }
 
-  // Frame rate optimization
-  const frameRate = info.connectionSpeed === 'slow' ? 15 : 30;
-  (constraints.video as MediaTrackConstraints).frameRate = { ideal: frameRate };
-
-  return constraints;
-}
-
-/**
- * Check if current device is in landscape orientation
- */
-export function isLandscape(): boolean {
-  return window.innerWidth > window.innerHeight;
-}
-
-/**
- * Check if device has sufficient memory for ML operations
- */
-export function hasEnoughMemory(): boolean {
-  // Check device memory if available
-  const deviceMemory = (navigator as any).deviceMemory;
-  if (deviceMemory) {
-    return deviceMemory >= 2; // At least 2GB RAM
+  /**
+   * Detect operating system
+   */
+  private getOperatingSystem(): DeviceInfo['os'] {
+    const userAgent = navigator.userAgent.toLowerCase();
+    const platform = navigator.platform.toLowerCase();
+    
+    if (/iphone|ipad|ipod/.test(userAgent)) return 'ios';
+    if (/android/.test(userAgent)) return 'android';
+    if (/win/.test(platform)) return 'windows';
+    if (/mac/.test(platform)) return 'macos';
+    if (/linux/.test(platform)) return 'linux';
+    
+    return 'unknown';
   }
-  
-  // Fallback: check if WebGL is available (usually indicates decent hardware)
-  return checkWebGLSupport();
-}
 
-/**
- * Get recommended model settings based on device
- */
-export function getRecommendedModelSettings(deviceInfo?: DeviceInfo) {
-  const info = deviceInfo || getDeviceInfo();
-  
-  // Conservative settings for mobile/low-end devices
-  if (info.isMobile || info.connectionSpeed === 'slow') {
+  /**
+   * Detect browser
+   */
+  private getBrowser(): DeviceInfo['browser'] {
+    const userAgent = navigator.userAgent.toLowerCase();
+    
+    if (/chrome/.test(userAgent) && !/edge|edg/.test(userAgent)) return 'chrome';
+    if (/firefox/.test(userAgent)) return 'firefox';
+    if (/safari/.test(userAgent) && !/chrome/.test(userAgent)) return 'safari';
+    if (/edge|edg/.test(userAgent)) return 'edge';
+    
+    return 'unknown';
+  }
+
+  /**
+   * Get browser version
+   */
+  private getBrowserVersion(): string {
+    const userAgent = navigator.userAgent;
+    const browser = this.getBrowser();
+    
+    let match: RegExpMatchArray | null = null;
+    
+    switch (browser) {
+      case 'chrome':
+        match = userAgent.match(/Chrome\/(\d+\.\d+)/);
+        break;
+      case 'firefox':
+        match = userAgent.match(/Firefox\/(\d+\.\d+)/);
+        break;
+      case 'safari':
+        match = userAgent.match(/Version\/(\d+\.\d+)/);
+        break;
+      case 'edge':
+        match = userAgent.match(/Edg\/(\d+\.\d+)/);
+        break;
+    }
+    
+    return match ? match[1] : 'unknown';
+  }
+
+  /**
+   * Check device capabilities
+   */
+  private async getCapabilities(): Promise<DeviceCapabilities> {
+    const capabilities: DeviceCapabilities = {
+      hasCamera: await this.checkCameraSupport(),
+      hasMicrophone: await this.checkMicrophoneSupport(),
+      hasWebGL: this.checkWebGLSupport(),
+      hasWebGL2: this.checkWebGL2Support(),
+      hasWebRTC: this.checkWebRTCSupport(),
+      hasServiceWorker: this.checkServiceWorkerSupport(),
+      hasNotifications: this.checkNotificationSupport(),
+      hasVibration: this.checkVibrationSupport(),
+      hasGeolocation: this.checkGeolocationSupport(),
+      hasFullscreen: this.checkFullscreenSupport(),
+      hasClipboard: this.checkClipboardSupport(),
+      hasTouchScreen: this.checkTouchSupport(),
+      hasAccelerometer: this.checkAccelerometerSupport(),
+      hasGyroscope: this.checkGyroscopeSupport(),
+      hasAmbientLight: this.checkAmbientLightSupport(),
+      hasProximity: this.checkProximitySupport(),
+      hasBattery: this.checkBatterySupport(),
+      hasWebAssembly: this.checkWebAssemblySupport(),
+      hasSharedArrayBuffer: this.checkSharedArrayBufferSupport(),
+      hasOffscreenCanvas: this.checkOffscreenCanvasSupport()
+    };
+
+    return capabilities;
+  }
+
+  /**
+   * Get performance information
+   */
+  private async getPerformanceInfo(): Promise<DevicePerformance> {
+    const cores = navigator.hardwareConcurrency || 2;
+    const memory = this.getMemoryInfo();
+    const gpu = this.getGPUInfo();
+    const maxTextureSize = this.getMaxTextureSize();
+    
+    const tier = this.calculatePerformanceTier(cores, memory, gpu);
+    const recommendedSettings = this.getRecommendedSettings(tier);
+
     return {
-      modelSize: 'small',
-      inputSize: 416,
-      confidenceThreshold: 0.6,
-      nmsThreshold: 0.5,
-      maxDetections: 10,
-      useGPU: false
+      cores,
+      memory,
+      tier,
+      gpu,
+      maxTextureSize,
+      recommendedSettings
     };
   }
-  
-  // Optimized settings for desktop/high-end devices
-  return {
-    modelSize: 'medium',
-    inputSize: 640,
-    confidenceThreshold: 0.5,
-    nmsThreshold: 0.4,
-    maxDetections: 20,
-    useGPU: info.supportsWebGL
-  };
-}
 
-/**
- * Detect if user prefers reduced motion
- */
-export function prefersReducedMotion(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-/**
- * Detect if user prefers dark mode
- */
-export function prefersDarkMode(): boolean {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-/**
- * Get safe area insets for devices with notches
- */
-export function getSafeAreaInsets() {
-  const computedStyle = getComputedStyle(document.documentElement);
-  
-  return {
-    top: computedStyle.getPropertyValue('env(safe-area-inset-top)') || '0px',
-    right: computedStyle.getPropertyValue('env(safe-area-inset-right)') || '0px',
-    bottom: computedStyle.getPropertyValue('env(safe-area-inset-bottom)') || '0px',
-    left: computedStyle.getPropertyValue('env(safe-area-inset-left)') || '0px'
-  };
-}
-
-/**
- * Vibrate device if supported (for feedback)
- */
-export function vibrate(pattern: number | number[] = 100): void {
-  if ('vibrate' in navigator) {
-    navigator.vibrate(pattern);
+  /**
+   * Check camera support
+   */
+  private async checkCameraSupport(): Promise<boolean> {
+    if (!navigator.mediaDevices?.getUserMedia) return false;
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch {
+      return false;
+    }
   }
-} 
+
+  /**
+   * Check microphone support
+   */
+  private async checkMicrophoneSupport(): Promise<boolean> {
+    if (!navigator.mediaDevices?.getUserMedia) return false;
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check WebGL support
+   */
+  private checkWebGLSupport(): boolean {
+    try {
+      const canvas = document.createElement('canvas');
+      return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check WebGL2 support
+   */
+  private checkWebGL2Support(): boolean {
+    try {
+      const canvas = document.createElement('canvas');
+      return !!canvas.getContext('webgl2');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check WebRTC support
+   */
+  private checkWebRTCSupport(): boolean {
+    return !!(window.RTCPeerConnection || 
+              (window as any).webkitRTCPeerConnection || 
+              (window as any).mozRTCPeerConnection);
+  }
+
+  /**
+   * Check Service Worker support
+   */
+  private checkServiceWorkerSupport(): boolean {
+    return 'serviceWorker' in navigator;
+  }
+
+  /**
+   * Check Notification support
+   */
+  private checkNotificationSupport(): boolean {
+    return 'Notification' in window;
+  }
+
+  /**
+   * Check Vibration support
+   */
+  private checkVibrationSupport(): boolean {
+    return 'vibrate' in navigator;
+  }
+
+  /**
+   * Check Geolocation support
+   */
+  private checkGeolocationSupport(): boolean {
+    return 'geolocation' in navigator;
+  }
+
+  /**
+   * Check Fullscreen support
+   */
+  private checkFullscreenSupport(): boolean {
+    return !!(document.documentElement.requestFullscreen ||
+              (document.documentElement as any).webkitRequestFullscreen ||
+              (document.documentElement as any).mozRequestFullScreen ||
+              (document.documentElement as any).msRequestFullscreen);
+  }
+
+  /**
+   * Check Clipboard support
+   */
+  private checkClipboardSupport(): boolean {
+    return 'clipboard' in navigator;
+  }
+
+  /**
+   * Check Touch support
+   */
+  private checkTouchSupport(): boolean {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  }
+
+  /**
+   * Check Accelerometer support
+   */
+  private checkAccelerometerSupport(): boolean {
+    return 'DeviceMotionEvent' in window;
+  }
+
+  /**
+   * Check Gyroscope support
+   */
+  private checkGyroscopeSupport(): boolean {
+    return 'DeviceOrientationEvent' in window;
+  }
+
+  /**
+   * Check Ambient Light support
+   */
+  private checkAmbientLightSupport(): boolean {
+    return 'AmbientLightSensor' in window;
+  }
+
+  /**
+   * Check Proximity support
+   */
+  private checkProximitySupport(): boolean {
+    return 'ProximitySensor' in window;
+  }
+
+  /**
+   * Check Battery support
+   */
+  private checkBatterySupport(): boolean {
+    return 'getBattery' in navigator;
+  }
+
+  /**
+   * Check WebAssembly support
+   */
+  private checkWebAssemblySupport(): boolean {
+    return 'WebAssembly' in window;
+  }
+
+  /**
+   * Check SharedArrayBuffer support
+   */
+  private checkSharedArrayBufferSupport(): boolean {
+    return 'SharedArrayBuffer' in window;
+  }
+
+  /**
+   * Check OffscreenCanvas support
+   */
+  private checkOffscreenCanvasSupport(): boolean {
+    return 'OffscreenCanvas' in window;
+  }
+
+  /**
+   * Get memory information
+   */
+  private getMemoryInfo(): number {
+    if ('memory' in performance) {
+      const memory = (performance as any).memory;
+      return Math.round(memory.jsHeapSizeLimit / (1024 * 1024 * 1024)); // Convert to GB
+    }
+    
+    // Estimate based on other factors
+    const cores = navigator.hardwareConcurrency || 2;
+    if (cores >= 8) return 8;
+    if (cores >= 4) return 4;
+    return 2;
+  }
+
+  /**
+   * Get GPU information
+   */
+  private getGPUInfo(): string {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') as WebGLRenderingContext || 
+                 canvas.getContext('experimental-webgl') as WebGLRenderingContext;
+      
+      if (gl) {
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          return gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || 'Unknown GPU';
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+    
+    return 'Unknown GPU';
+  }
+
+  /**
+   * Get maximum texture size
+   */
+  private getMaxTextureSize(): number {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') as WebGLRenderingContext || 
+                 canvas.getContext('experimental-webgl') as WebGLRenderingContext;
+      
+      if (gl) {
+        return gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
+      }
+    } catch {
+      // Ignore errors
+    }
+    
+    return 2048; // Safe default
+  }
+
+  /**
+   * Calculate performance tier
+   */
+  private calculatePerformanceTier(cores: number, memory: number, gpu: string): 'low' | 'medium' | 'high' {
+    let score = 0;
+    
+    // CPU score
+    if (cores >= 8) score += 3;
+    else if (cores >= 4) score += 2;
+    else score += 1;
+    
+    // Memory score
+    if (memory >= 8) score += 3;
+    else if (memory >= 4) score += 2;
+    else score += 1;
+    
+    // GPU score
+    const gpuLower = gpu.toLowerCase();
+    if (/nvidia|amd|intel iris|mali-g7|adreno 6/.test(gpuLower)) score += 3;
+    else if (/intel|mali|adreno/.test(gpuLower)) score += 2;
+    else score += 1;
+    
+    if (score >= 7) return 'high';
+    if (score >= 5) return 'medium';
+    return 'low';
+  }
+
+  /**
+   * Get recommended settings based on performance tier
+   */
+  private getRecommendedSettings(tier: 'low' | 'medium' | 'high'): DevicePerformance['recommendedSettings'] {
+    switch (tier) {
+      case 'high':
+        return {
+          modelSize: 'large',
+          inferenceFrequency: 50,
+          maxResolution: 1280,
+          enableOptimizations: false
+        };
+      case 'medium':
+        return {
+          modelSize: 'medium',
+          inferenceFrequency: 100,
+          maxResolution: 960,
+          enableOptimizations: true
+        };
+      case 'low':
+        return {
+          modelSize: 'small',
+          inferenceFrequency: 200,
+          maxResolution: 640,
+          enableOptimizations: true
+        };
+    }
+  }
+}
+
+/**
+ * Device-specific optimizations
+ */
+export class DeviceOptimizer {
+  private deviceInfo?: DeviceInfo;
+
+  constructor(private detector: DeviceDetector) {}
+
+  async initialize(): Promise<void> {
+    this.deviceInfo = await this.detector.getDeviceInfo();
+  }
+
+  /**
+   * Get optimized camera constraints
+   */
+  getCameraConstraints(): MediaStreamConstraints {
+    if (!this.deviceInfo) {
+      throw new Error('DeviceOptimizer not initialized');
+    }
+
+    const { performance, type } = this.deviceInfo;
+    const { maxResolution } = performance.recommendedSettings;
+
+    return {
+      video: {
+        width: { ideal: Math.min(maxResolution, 1280) },
+        height: { ideal: Math.min(maxResolution * 0.75, 960) },
+        frameRate: type === 'mobile' ? { ideal: 20, max: 30 } : { ideal: 30 },
+        facingMode: type === 'mobile' ? 'environment' : 'user'
+      }
+    };
+  }
+
+  /**
+   * Get optimized canvas size
+   */
+  getOptimizedCanvasSize(targetWidth: number, targetHeight: number): { width: number; height: number } {
+    if (!this.deviceInfo) {
+      return { width: targetWidth, height: targetHeight };
+    }
+
+    const { maxResolution } = this.deviceInfo.performance.recommendedSettings;
+    const scale = Math.min(maxResolution / Math.max(targetWidth, targetHeight), 1);
+
+    return {
+      width: Math.round(targetWidth * scale),
+      height: Math.round(targetHeight * scale)
+    };
+  }
+
+  /**
+   * Check if feature should be enabled
+   */
+  shouldEnableFeature(feature: keyof DeviceCapabilities): boolean {
+    if (!this.deviceInfo) return false;
+    return this.deviceInfo.capabilities[feature];
+  }
+
+  /**
+   * Get performance recommendations
+   */
+  getPerformanceRecommendations(): string[] {
+    if (!this.deviceInfo) return [];
+
+    const recommendations: string[] = [];
+    const { performance, type, capabilities } = this.deviceInfo;
+
+    if (performance.tier === 'low') {
+      recommendations.push('Consider using lower resolution for better performance');
+      recommendations.push('Reduce inference frequency to save battery');
+    }
+
+    if (type === 'mobile' && !capabilities.hasWebGL2) {
+      recommendations.push('WebGL2 not available - some features may be limited');
+    }
+
+    if (performance.cores < 4) {
+      recommendations.push('Limited CPU cores detected - enable performance optimizations');
+    }
+
+    if (performance.memory < 4) {
+      recommendations.push('Limited memory detected - avoid memory-intensive operations');
+    }
+
+    return recommendations;
+  }
+}
+
+/**
+ * Utility functions
+ */
+export const DeviceUtils = {
+  /**
+   * Check if device is mobile
+   */
+  isMobile(): boolean {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  },
+
+  /**
+   * Check if device is iOS
+   */
+  isIOS(): boolean {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  },
+
+  /**
+   * Check if device is Android
+   */
+  isAndroid(): boolean {
+    return /Android/.test(navigator.userAgent);
+  },
+
+  /**
+   * Check if device is in landscape mode
+   */
+  isLandscape(): boolean {
+    return window.innerWidth > window.innerHeight;
+  },
+
+  /**
+   * Get device pixel ratio
+   */
+  getPixelRatio(): number {
+    return window.devicePixelRatio || 1;
+  },
+
+  /**
+   * Check if device supports hover
+   */
+  supportsHover(): boolean {
+    return window.matchMedia('(hover: hover)').matches;
+  },
+
+  /**
+   * Get safe area insets for notched devices
+   */
+  getSafeAreaInsets(): { top: number; right: number; bottom: number; left: number } {
+    const computedStyle = getComputedStyle(document.documentElement);
+    
+    return {
+      top: parseInt(computedStyle.getPropertyValue('env(safe-area-inset-top)') || '0'),
+      right: parseInt(computedStyle.getPropertyValue('env(safe-area-inset-right)') || '0'),
+      bottom: parseInt(computedStyle.getPropertyValue('env(safe-area-inset-bottom)') || '0'),
+      left: parseInt(computedStyle.getPropertyValue('env(safe-area-inset-left)') || '0')
+    };
+  }
+};
+
+// Global instances
+export const deviceDetector = new DeviceDetector();
+export const deviceOptimizer = new DeviceOptimizer(deviceDetector); 
