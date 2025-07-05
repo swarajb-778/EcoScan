@@ -1,104 +1,145 @@
 {
   "name": "EcoScan - AI Waste Classification",
   "short_name": "EcoScan",
-  "description": "Real-time waste classification using computer vision and voice recognition for better recycling",
+  "description": "AI-powered waste classification application for better environmental choices",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
   "theme_color": "#22c55e",
   "background_color": "#ffffff",
-  "display": "standalone",
-  "orientation": "portrait",
-  "scope": "/",
-  "start_url": "/",
   "lang": "en",
   "dir": "ltr",
-  "categories": ["utilities", "productivity", "education", "lifestyle"],
+  "categories": ["productivity", "utilities", "environmental"],
   "icons": [
     {
       "src": "/favicon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     },
     {
-      "src": "/pwa-64x64.png",
-      "sizes": "64x64",
-      "type": "image/png"
-    },
-    {
-      "src": "/pwa-192x192.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "/pwa-512x512.png",
+      "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "/maskable-icon-512x512.png",
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile-1.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Camera detection in action"
+    },
+    {
+      "src": "/screenshot-mobile-2.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Waste classification results"
+    },
+    {
+      "src": "/screenshot-desktop-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Desktop interface overview"
     }
   ],
   "shortcuts": [
     {
       "name": "Camera Scan",
       "short_name": "Camera",
-      "description": "Open camera for real-time detection",
+      "description": "Start camera detection",
       "url": "/",
       "icons": [
         {
-          "src": "/camera-shortcut.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": "Voice Input",
-      "short_name": "Voice", 
-      "description": "Use voice to classify items",
-      "url": "/voice",
-      "icons": [
-        {
-          "src": "/voice-shortcut.png",
-          "sizes": "96x96",
-          "type": "image/png"
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
         }
       ]
     },
     {
       "name": "Upload Image",
       "short_name": "Upload",
-      "description": "Upload and analyze images",
+      "description": "Upload image for analysis",
       "url": "/upload",
       "icons": [
         {
-          "src": "/upload-shortcut.png",
-          "sizes": "96x96", 
-          "type": "image/png"
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
         }
       ]
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/screenshot-mobile.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Camera detection on mobile"
     },
     {
-      "src": "/screenshot-desktop.png", 
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Desktop interface"
+      "name": "Voice Input",
+      "short_name": "Voice",
+      "description": "Use voice to describe waste",
+      "url": "/voice",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
     }
   ],
   "related_applications": [],
   "prefer_related_applications": false,
   "edge_side_panel": {
     "preferred_width": 400
+  },
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "file_handlers": [
+    {
+      "action": "/upload",
+      "accept": {
+        "image/*": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
+      }
+    }
+  ],
+  "protocol_handlers": [
+    {
+      "protocol": "web+ecoscan",
+      "url": "/?share=%s"
+    }
+  ],
+  "share_target": {
+    "action": "/upload",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "image",
+          "accept": ["image/*"]
+        }
+      ]
+    }
   }
 } 
