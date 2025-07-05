@@ -463,4 +463,28 @@ export function generateReport(detections: Detection[]): {
 /**
  * Global waste database instance
  */
-export const wasteDatabase = new WasteDatabase(); 
+export const wasteDatabase = new WasteDatabase();
+
+export async function loadWasteData(): Promise<any> {
+  try {
+    const resp = await fetch('/data/wasteData.json');
+    if (!resp.ok) throw new Error('Failed to fetch waste data');
+    const data = await resp.json();
+    if (!data || !data.objects) throw new Error('Waste data missing required fields');
+    return data;
+  } catch (error) {
+    console.error('❌ Failed to load waste data:', error);
+    // Fallback to minimal dataset
+    return {
+      objects: {
+        unknown: {
+          category: 'landfill',
+          confidence: 0.3,
+          instructions: 'Unknown item - default to landfill',
+          tips: 'Try updating the app or checking your connection.'
+        }
+      },
+      keywords: {}
+    };
+  }
+} 
