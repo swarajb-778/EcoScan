@@ -7,23 +7,10 @@
  * Sanitize user input to prevent XSS attacks
  */
 export function sanitizeInput(input: string): string {
-  if (typeof input !== 'string') {
-    return '';
-  }
-
-  return input
-    .replace(/[<>'"&]/g, (char) => {
-      switch (char) {
-        case '<': return '&lt;';
-        case '>': return '&gt;';
-        case '"': return '&quot;';
-        case "'": return '&#x27;';
-        case '&': return '&amp;';
-        default: return char;
-      }
-    })
-    .trim()
-    .slice(0, 1000); // Limit length
+  // Remove script tags and dangerous characters
+  return input.replace(/<script.*?>.*?<\/script>/gi, '')
+    .replace(/[<>"'`;(){}]/g, '')
+    .trim();
 }
 
 /**
@@ -342,4 +329,26 @@ export function validateInput(
 
 // Global security instance
 export const secureStorage = new SecureStorage();
-export const rateLimiter = new RateLimiter(); 
+export const rateLimiter = new RateLimiter();
+
+export function isValidInput(input: string): boolean {
+  // Only allow alphanumeric, spaces, dashes, and underscores
+  return /^[\w\s\-_]+$/.test(input);
+}
+
+export function safeSetLocalStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn('Failed to set localStorage:', error);
+  }
+}
+
+export function safeGetLocalStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.warn('Failed to get localStorage:', error);
+    return null;
+  }
+} 
