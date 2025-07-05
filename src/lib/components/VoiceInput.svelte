@@ -53,6 +53,13 @@
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
+    // Check if selected language is supported
+    const supportedLangs = ['en-US', 'en-GB', 'es-ES', 'fr-FR', 'de-DE', 'it-IT', 'zh-CN', 'ja-JP'];
+    if (!supportedLangs.includes(recognition.lang)) {
+      setError('Selected language is not supported for speech recognition. Defaulting to English.');
+      recognition.lang = 'en-US';
+    }
+
     recognition.onstart = () => {
       isListening.set(true);
       console.log('🎤 Voice recognition started');
@@ -63,7 +70,14 @@
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
       }
-      
+      if (transcript.length < 2) {
+        setError('Utterance too short. Please speak a complete item name.');
+        return;
+      }
+      if (transcript.length > 100) {
+        setError('Utterance too long. Please keep your description concise.');
+        return;
+      }
       lastTranscript.set(transcript);
       
       // If result is final, classify it
@@ -73,8 +87,7 @@
     };
 
     recognition.onerror = (event) => {
-      console.error('Voice recognition error:', event.error);
-      setError(`Voice recognition error: ${event.error}`);
+      setError('Speech-to-text error: ' + event.error);
       isListening.set(false);
     };
 
