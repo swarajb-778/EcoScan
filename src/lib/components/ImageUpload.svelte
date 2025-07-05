@@ -280,12 +280,16 @@
     </p>
 
     <!-- Drag and Drop Area -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div 
       class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center transition-colors
              {dragActive ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'}"
       on:dragover={handleDragOver}
       on:dragleave={handleDragLeave}
       on:drop={handleDrop}
+      role="button"
+      tabindex="0"
+      aria-label="Drag and drop image upload area"
     >
       {#if uploadedFile}
         <div class="space-y-4">

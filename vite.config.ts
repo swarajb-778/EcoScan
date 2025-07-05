@@ -20,42 +20,12 @@ export default defineConfig({
 				start_url: '/',
 				icons: [
 					{
-						src: '/pwa-64x64.png',
-						sizes: '64x64',
-						type: 'image/png'
-					},
-					{
-						src: '/pwa-192x192.png',
-						sizes: '192x192',
-						type: 'image/png'
-					},
-					{
-						src: '/pwa-512x512.png',
-						sizes: '512x512',
-						type: 'image/png'
-					},
-					{
-						src: '/maskable-icon-512x512.png',
-						sizes: '512x512',
-						type: 'image/png',
-						purpose: 'maskable'
+						src: '/favicon.svg',
+						sizes: 'any',
+						type: 'image/svg+xml'
 					}
 				],
-				categories: ['utilities', 'productivity', 'education'],
-				screenshots: [
-					{
-						src: '/screenshot-mobile.png',
-						sizes: '390x844',
-						type: 'image/png',
-						form_factor: 'narrow'
-					},
-					{
-						src: '/screenshot-desktop.png',
-						sizes: '1280x720',
-						type: 'image/png',
-						form_factor: 'wide'
-					}
-				]
+				categories: ['utilities', 'productivity', 'education']
 			},
 			workbox: {
 				globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
@@ -102,17 +72,25 @@ export default defineConfig({
 		})
 	],
 	optimizeDeps: {
-		include: ['onnxruntime-web', 'fuse.js']
+		include: ['fuse.js'],
+		exclude: ['onnxruntime-web']
 	},
 	build: {
 		target: 'esnext',
 		rollupOptions: {
 			output: {
-				manualChunks: {
-					'ml-vendor': ['onnxruntime-web'],
-					'search-vendor': ['fuse.js']
+				manualChunks: (id) => {
+					if (id.includes('fuse.js')) {
+						return 'search-vendor';
+					}
 				}
 			}
+		}
+	},
+	server: {
+		headers: {
+			'Cross-Origin-Embedder-Policy': 'require-corp',
+			'Cross-Origin-Opener-Policy': 'same-origin'
 		}
 	}
 });

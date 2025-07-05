@@ -49,15 +49,29 @@
 </script>
 
 {#if $selectedDetection}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" on:click={closeDetails}>
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto" on:click|stopPropagation>
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div 
+    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" 
+    on:click={closeDetails}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="detection-title"
+  >
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div 
+      class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto" 
+      on:click|stopPropagation
+      role="document"
+    >
       <!-- Header -->
       <div class="bg-gradient-to-r {getCategoryColor($selectedDetection.category)} p-6 text-white rounded-t-2xl">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3">
             <span class="text-3xl">{getCategoryIcon($selectedDetection.category)}</span>
             <div>
-              <h3 class="text-xl font-bold capitalize">{$selectedDetection.class}</h3>
+              <h3 id="detection-title" class="text-xl font-bold capitalize">{$selectedDetection.class}</h3>
               <p class="text-sm opacity-90">
                 {($selectedDetection.confidence * 100).toFixed(0)}% confidence
               </p>
@@ -66,6 +80,7 @@
           <button 
             on:click={closeDetails}
             class="text-white hover:text-gray-200 transition-colors"
+            aria-label="Close detection details"
           >
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
