@@ -11,17 +11,24 @@ export class ObjectDetector {
   }
 
   async initialize(): Promise<void> {
-    try {
-      // Load the YOLO model with optimized execution providers
-      this.session = await InferenceSession.create(this.modelConfig.modelPath, {
-        executionProviders: ['webgl', 'wasm'],
-        graphOptimizationLevel: 'all'
-      });
-      this.isInitialized = true;
-      console.log('🤖 YOLO model loaded successfully');
-    } catch (error) {
-      console.error('❌ Failed to load YOLO model:', error);
-      throw new Error(`Model initialization failed: ${error}`);
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (attempts < maxAttempts) {
+      try {
+        this.session = await InferenceSession.create(this.modelConfig.modelPath, {
+          executionProviders: ['webgl', 'wasm'],
+          graphOptimizationLevel: 'all'
+        });
+        this.isInitialized = true;
+        console.log('🤖 YOLO model loaded successfully');
+        return;
+      } catch (error) {
+        attempts++;
+        console.error(`❌ Failed to load YOLO model (attempt ${attempts}):`, error);
+        if (attempts >= maxAttempts) {
+          throw new Error(`Model initialization failed after ${maxAttempts} attempts: ${error}`);
+        }
+      }
     }
   }
 
@@ -29,21 +36,27 @@ export class ObjectDetector {
     if (!this.session || !this.isInitialized) {
       throw new Error('Model not initialized. Call initialize() first.');
     }
-
     try {
-      // Preprocess the image
       const preprocessedTensor = this.preprocessImage(imageData);
-      
-      // Run inference
       const results = await this.session.run({ images: preprocessedTensor });
-      
-      // Post-process results to get detections
-      const detections = this.postprocessResults(results, imageData.width, imageData.height);
-      
+      let detections = this.postprocessResults(results, imageData.width, imageData.height);
+      // Limit max objects
+      if (detections.length > 10) {
+        console.warn('Too many objects detected. Limiting to 10.');
+        detections = detections.slice(0, 10);
+      }
+      if (detections.length === 0) {
+        console.warn('No objects detected in frame.');
+      }
       return detections;
     } catch (error) {
       console.error('❌ Detection failed:', error);
-      return [];
+      return [{
+        bbox: [0, 0, 0, 0],
+        class: 'unknown',
+        confidence: 0,
+        category: 'landfill'
+      }];
     }
   }
 
@@ -134,7 +147,7 @@ export class ObjectDetector {
       const height = boxHeight * (originalHeight / modelHeight);
       
       // Get class name from COCO classes
-      const className = this.getClassName(maxClassIndex);
+      const className = this.getClassName(maxClassIndex) || 'unknown';
       
       detections.push({
         bbox: [x, y, width, height],
