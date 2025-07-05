@@ -65,10 +65,9 @@
   function handleDrop(event: DragEvent) {
     event.preventDefault();
     dragActive = false;
-    
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
-      handleFile(files[0]);
+      handleFiles(files);
     }
   }
 
@@ -76,25 +75,54 @@
     const target = event.target as HTMLInputElement;
     const files = target.files;
     if (files && files.length > 0) {
-      handleFile(files[0]);
+      handleFiles(files);
     }
   }
 
   function handleFile(file: File) {
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      setError('Please select a valid image file');
+      setError('Please select a valid image file.');
       return;
     }
-
     // Check file size (limit to 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      setError('Image file too large. Please select a file under 10MB');
+      setError('Image file too large. Please select a file under 10MB.');
       return;
     }
+    // Check for supported formats
+    const supportedFormats = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
+    if (!supportedFormats.includes(file.type)) {
+      setError('Unsupported image format. Please use JPG, PNG, WebP, GIF, or BMP.');
+      return;
+    }
+    // Try to load image
+    const reader = new FileReader();
+    reader.onerror = () => setError('Failed to read image file. The file may be corrupt.');
+    reader.onload = (e) => {
+      const imageSrc = e.target?.result as string;
+      previewImage.src = imageSrc;
+      previewImage.onload = () => {
+        // Warn for extreme aspect ratios
+        if (previewImage.naturalWidth / previewImage.naturalHeight > 4 || previewImage.naturalHeight / previewImage.naturalWidth > 4) {
+          setError('Image aspect ratio is extreme. Detection may be unreliable.');
+        }
+        setupCanvas();
+        processImage();
+      };
+      previewImage.onerror = () => setError('Failed to load image. The file may be corrupt or unsupported.');
+    };
+    reader.readAsDataURL(file);
+  }
 
-    uploadedFile = file;
-    displayImage(file);
+  function handleFiles(files: FileList) {
+    if (files.length > 5) {
+      setError('Batch upload limit exceeded. Please select up to 5 images.');
+      return;
+    }
+    for (let i = 0; i < files.length; i++) {
+      handleFile(files[i]);
+    }
   }
 
   function displayImage(file: File) {
