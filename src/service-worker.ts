@@ -27,6 +27,14 @@ const ML_ASSETS = [
 self.addEventListener('install', (event) => {
   console.log('🔧 Service Worker installing...');
   
+  fetch('/manifest.json').then(resp => {
+    if (!resp.ok) {
+      console.warn('PWA manifest missing or invalid.');
+    }
+  }).catch(() => {
+    console.warn('PWA manifest could not be fetched.');
+  });
+  
   event.waitUntil(
     Promise.all([
       // Cache static assets
@@ -66,6 +74,11 @@ self.addEventListener('activate', (event) => {
           })
       );
     }).then(() => {
+      self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage({ type: 'UPDATE_AVAILABLE' });
+        });
+      });
       console.log('✅ Service Worker activated');
       return self.clients.claim();
     })
@@ -119,10 +132,7 @@ self.addEventListener('fetch', (event) => {
         });
 
         return response;
-      }).catch((error) => {
-        console.error(`❌ Network error for ${url.pathname}:`, error);
-        
-        // Return offline fallback for navigation requests
+      }).catch(() => {
         if (request.mode === 'navigate') {
           return caches.match('/').then(offline => 
             offline || new Response('Offline', {
@@ -131,8 +141,7 @@ self.addEventListener('fetch', (event) => {
             })
           );
         }
-        
-        throw error;
+        return new Response('Resource unavailable while offline.', { status: 503 });
       });
     })
   );
