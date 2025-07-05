@@ -117,6 +117,29 @@
     overlayCanvasElement.style.pointerEvents = 'none';
   }
 
+  function checkLowLightAndResolution() {
+    if (!canvasElement) return;
+    const ctx = canvasElement.getContext('2d');
+    if (!ctx) return;
+    const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+    // Calculate average brightness
+    let total = 0;
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      total += 0.299 * imageData.data[i] + 0.587 * imageData.data[i+1] + 0.114 * imageData.data[i+2];
+    }
+    const avg = total / (imageData.data.length / 4);
+    if (avg < 40) {
+      setError('Low light detected. Please increase lighting for better detection.');
+    }
+    // Resolution check
+    if (canvasElement.width < 320 || canvasElement.height < 240) {
+      setError('Camera resolution too low for reliable detection.');
+    }
+    if (canvasElement.width > 1920 || canvasElement.height > 1080) {
+      setError('Camera resolution too high. Please lower resolution for better performance.');
+    }
+  }
+
   function startDetectionLoop() {
     if (!detector || !classifier) return;
 
@@ -163,6 +186,8 @@
             frameCount = 0;
             lastFrameTime = now;
           }
+
+          checkLowLightAndResolution();
 
         } catch (error) {
           console.error('Detection error:', error);
