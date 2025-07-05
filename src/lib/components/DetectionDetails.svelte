@@ -5,6 +5,7 @@
 
   let classifier: WasteClassifier | null = null;
   let detailedClassification: WasteClassification | null = null;
+  let colorBlindMode = false;
 
   // Initialize classifier
   $: if ($selectedDetection && !classifier) {
@@ -39,12 +40,29 @@
   }
 
   function getCategoryColor(category: string) {
+    if (colorBlindMode) {
+      switch (category) {
+        case 'recycle': return 'from-blue-500 to-blue-700';
+        case 'compost': return 'from-yellow-500 to-yellow-700';
+        case 'landfill': return 'from-gray-500 to-gray-700';
+        default: return 'from-gray-500 to-gray-600';
+      }
+    }
     switch (category) {
       case 'recycle': return 'from-green-500 to-emerald-600';
       case 'compost': return 'from-lime-500 to-green-600';
       case 'landfill': return 'from-red-500 to-pink-600';
       default: return 'from-gray-500 to-gray-600';
     }
+  }
+
+  function validateBoundingBox(bbox: [number, number, number, number], imageWidth: number, imageHeight: number): boolean {
+    const [x, y, width, height] = bbox;
+    if (x < 0 || y < 0 || x + width > imageWidth || y + height > imageHeight) {
+      console.warn('Bounding box is outside image bounds.');
+      return false;
+    }
+    return true;
   }
 </script>
 
@@ -57,6 +75,8 @@
     role="dialog"
     aria-modal="true"
     aria-labelledby="detection-title"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') closeDetails(); }}
   >
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
