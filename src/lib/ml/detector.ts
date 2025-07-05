@@ -162,28 +162,24 @@ export class ObjectDetector {
   }
 
   private applyNMS(detections: Detection[]): Detection[] {
-    // Sort by confidence (highest first)
     detections.sort((a, b) => b.confidence - a.confidence);
-    
     const results: Detection[] = [];
     const suppressed = new Set<number>();
-    
     for (let i = 0; i < detections.length; i++) {
       if (suppressed.has(i)) continue;
-      
       results.push(detections[i]);
-      
-      // Suppress overlapping detections
       for (let j = i + 1; j < detections.length; j++) {
         if (suppressed.has(j)) continue;
-        
         const iou = this.calculateIoU(detections[i].bbox, detections[j].bbox);
         if (iou > this.modelConfig.iouThreshold) {
           suppressed.add(j);
+          console.warn(`Suppressed overlapping detection (IoU=${iou.toFixed(2)} > threshold)`);
         }
       }
     }
-    
+    if (suppressed.size > 0) {
+      console.warn(`${suppressed.size} overlapping objects suppressed by NMS.`);
+    }
     return results;
   }
 
