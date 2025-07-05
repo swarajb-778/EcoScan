@@ -31,14 +31,21 @@ export class WasteClassifier {
       console.log('🗃️ Waste classification database loaded');
     } catch (error) {
       console.error('❌ Failed to load classification data:', error);
-      throw new Error(`Classification initialization failed: ${error}`);
+      this.classificationData = null;
+      throw new Error('Classification database failed to load. Please check your connection or try again later.');
     }
   }
 
   classify(objectName: string): WasteClassification | null {
     if (!this.isInitialized || !this.classificationData) {
       console.warn('Classifier not initialized');
-      return null;
+      return {
+        category: 'landfill',
+        confidence: 0.3,
+        instructions: 'Classification system not initialized. Defaulting to landfill.',
+        tips: 'Try reloading the app or checking your connection.',
+        color: '#6b7280'
+      };
     }
 
     // Direct match in classifications
@@ -50,6 +57,9 @@ export class WasteClassifier {
     // Try keyword matching with fuzzy search
     const keywordMatch = this.findKeywordMatch(normalizedName);
     if (keywordMatch) {
+      if (keywordMatch.confidence < 0.5) {
+        console.warn('Classification confidence is low. Result may be unreliable.');
+      }
       return keywordMatch;
     }
 
