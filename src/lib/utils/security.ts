@@ -1,6 +1,6 @@
 /**
  * Security utilities for EcoScan
- * Handles input sanitization, CSP, and security headers
+ * Input validation, sanitization, and security helpers
  */
 
 /**
@@ -29,309 +29,317 @@ export function sanitizeInput(input: string): string {
 /**
  * Validate file uploads for security
  */
-export function validateFileUpload(file: File): { valid: boolean; error?: string } {
-  // Check file type
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-  if (!allowedTypes.includes(file.type)) {
-    return {
-      valid: false,
-      error: 'Invalid file type. Only JPEG, PNG, WebP, and GIF files are allowed.'
-    };
-  }
-
+export function validateFileUpload(file: File): {
+  isValid: boolean;
+  error?: string;
+  sanitizedName?: string;
+} {
   // Check file size (max 10MB)
   const maxSize = 10 * 1024 * 1024;
   if (file.size > maxSize) {
     return {
-      valid: false,
-      error: 'File too large. Maximum size is 10MB.'
+      isValid: false,
+      error: 'File size exceeds 10MB limit'
     };
   }
 
-  // Check file name
-  const sanitizedName = sanitizeFileName(file.name);
-  if (sanitizedName !== file.name) {
+  // Check file type
+  const allowedTypes = [
+    'image/jpeg',
+    'image/jpg', 
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'image/bmp'
+  ];
+
+  if (!allowedTypes.includes(file.type)) {
     return {
-      valid: false,
-      error: 'Invalid characters in filename.'
+      isValid: false,
+      error: 'Invalid file type. Only images are allowed.'
     };
   }
 
-  return { valid: true };
+  // Sanitize filename
+  const sanitizedName = file.name
+    .replace(/[^a-zA-Z0-9.-]/g, '_')
+    .slice(0, 100);
+
+  return {
+    isValid: true,
+    sanitizedName
+  };
 }
 
 /**
- * Sanitize file names
+ * Validate URLs for security
  */
-export function sanitizeFileName(fileName: string): string {
-  return fileName
-    .replace(/[^a-zA-Z0-9._-]/g, '')
-    .replace(/\.{2,}/g, '.')
-    .slice(0, 255);
-}
-
-/**
- * Content Security Policy configuration
- */
-export const CSP_DIRECTIVES = {
-  'default-src': ["'self'"],
-  'script-src': [
-    "'self'",
-    "'unsafe-inline'", // Required for Svelte
-    "'wasm-unsafe-eval'", // Required for ONNX Runtime
-    "https://cdn.jsdelivr.net" // For external libraries
-  ],
-  'style-src': [
-    "'self'",
-    "'unsafe-inline'", // Required for Tailwind
-    "https://fonts.googleapis.com"
-  ],
-  'font-src': [
-    "'self'",
-    "https://fonts.gstatic.com"
-  ],
-  'img-src': [
-    "'self'",
-    "data:", // For canvas/blob images
-    "blob:" // For camera streams
-  ],
-  'media-src': [
-    "'self'",
-    "blob:" // For camera streams
-  ],
-  'worker-src': [
-    "'self'",
-    "blob:" // For ONNX workers
-  ],
-  'connect-src': [
-    "'self'",
-    "https://api.ecoscan.app" // API endpoints
-  ],
-  'frame-ancestors': ["'none'"],
-  'base-uri': ["'self'"],
-  'form-action': ["'self'"]
-};
-
-/**
- * Generate CSP header value
- */
-export function generateCSPHeader(): string {
-  return Object.entries(CSP_DIRECTIVES)
-    .map(([directive, sources]) => `${directive} ${sources.join(' ')}`)
-    .join('; ');
-}
-
-/**
- * Rate limiting for API calls
- */
-export class RateLimiter {
-  private attempts = new Map<string, { count: number; resetTime: number }>();
-  private readonly maxAttempts: number;
-  private readonly windowMs: number;
-
-  constructor(maxAttempts = 100, windowMs = 60000) {
-    this.maxAttempts = maxAttempts;
-    this.windowMs = windowMs;
-  }
-
-  /**
-   * Check if request is allowed
-   */
-  isAllowed(identifier: string): boolean {
-    const now = Date.now();
-    const record = this.attempts.get(identifier);
-
-    if (!record || now > record.resetTime) {
-      // Reset or first attempt
-      this.attempts.set(identifier, {
-        count: 1,
-        resetTime: now + this.windowMs
-      });
-      return true;
-    }
-
-    if (record.count >= this.maxAttempts) {
-      return false;
-    }
-
-    record.count++;
-    return true;
-  }
-
-  /**
-   * Get remaining attempts
-   */
-  getRemainingAttempts(identifier: string): number {
-    const record = this.attempts.get(identifier);
-    if (!record || Date.now() > record.resetTime) {
-      return this.maxAttempts;
-    }
-    return Math.max(0, this.maxAttempts - record.count);
-  }
-
-  /**
-   * Clean up expired records
-   */
-  cleanup(): void {
-    const now = Date.now();
-    for (const [key, record] of this.attempts.entries()) {
-      if (now > record.resetTime) {
-        this.attempts.delete(key);
-      }
-    }
-  }
-}
-
-/**
- * Secure random ID generation
- */
-export function generateSecureId(length = 16): string {
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Hash sensitive data
- */
-export async function hashData(data: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(data);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Validate URL for security
- */
-export function isValidUrl(url: string, allowedHosts?: string[]): boolean {
+export function validateUrl(url: string): boolean {
   try {
     const urlObj = new URL(url);
-    
-    // Only allow HTTPS (except localhost for development)
-    if (urlObj.protocol !== 'https:' && !urlObj.hostname.includes('localhost')) {
-      return false;
-    }
-
-    // Check allowed hosts if provided
-    if (allowedHosts && !allowedHosts.includes(urlObj.hostname)) {
-      return false;
-    }
-
-    return true;
+    return ['http:', 'https:'].includes(urlObj.protocol);
   } catch {
     return false;
   }
 }
 
 /**
- * Prevent timing attacks
+ * Generate secure random IDs
  */
-export function secureCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
+export function generateSecureId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
   }
-
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-
-  return result === 0;
+  
+  // Fallback for older browsers
+  return 'xxxx-xxxx-4xxx-yxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
 /**
- * Security headers for enhanced protection
+ * Rate limiting utility
  */
-export const SECURITY_HEADERS = {
-  'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
-  'X-XSS-Protection': '1; mode=block',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload'
+export class RateLimiter {
+  private attempts: Map<string, number[]> = new Map();
+  private maxAttempts: number;
+  private windowMs: number;
+
+  constructor(maxAttempts = 10, windowMs = 60000) {
+    this.maxAttempts = maxAttempts;
+    this.windowMs = windowMs;
+  }
+
+  isAllowed(identifier: string): boolean {
+    const now = Date.now();
+    const attempts = this.attempts.get(identifier) || [];
+    
+    // Remove old attempts outside the window
+    const recentAttempts = attempts.filter(time => now - time < this.windowMs);
+    
+    if (recentAttempts.length >= this.maxAttempts) {
+      return false;
+    }
+
+    // Add current attempt
+    recentAttempts.push(now);
+    this.attempts.set(identifier, recentAttempts);
+    
+    return true;
+  }
+
+  reset(identifier: string): void {
+    this.attempts.delete(identifier);
+  }
+}
+
+/**
+ * Content Security Policy helpers
+ */
+export const CSP_DIRECTIVES = {
+  'default-src': ["'self'"],
+  'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+  'style-src': ["'self'", "'unsafe-inline'"],
+  'img-src': ["'self'", 'data:', 'blob:'],
+  'media-src': ["'self'", 'blob:'],
+  'connect-src': ["'self'"],
+  'font-src': ["'self'"],
+  'object-src': ["'none'"],
+  'base-uri': ["'self'"],
+  'frame-ancestors': ["'none'"]
 };
 
 /**
- * Monitor for potential security issues
+ * Validate and sanitize voice input
  */
-export class SecurityMonitor {
-  private suspiciousActivities: Array<{
-    type: string;
-    timestamp: number;
-    details: any;
-  }> = [];
-
-  /**
-   * Report suspicious activity
-   */
-  reportActivity(type: string, details: any): void {
-    this.suspiciousActivities.push({
-      type,
-      timestamp: Date.now(),
-      details
-    });
-
-    // Keep only recent activities
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    this.suspiciousActivities = this.suspiciousActivities
-      .filter(activity => activity.timestamp > oneHourAgo);
-
-    // Check for patterns
-    this.checkForPatterns();
+export function sanitizeVoiceInput(input: string): string {
+  if (typeof input !== 'string') {
+    return '';
   }
 
-  private checkForPatterns(): void {
-    const recentActivities = this.suspiciousActivities
-      .filter(activity => activity.timestamp > Date.now() - 5 * 60 * 1000); // Last 5 minutes
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '') // Only allow alphanumeric, spaces, and hyphens
+    .slice(0, 200); // Limit length
+}
 
-    // Too many failed attempts
-    const failedAttempts = recentActivities
-      .filter(activity => activity.type === 'failed_upload' || activity.type === 'invalid_input');
+/**
+ * Secure local storage wrapper
+ */
+export class SecureStorage {
+  private prefix: string;
 
-    if (failedAttempts.length > 10) {
-      console.warn('Security: High number of failed attempts detected');
-      // In production, you might want to temporarily block the user
-    }
+  constructor(prefix = 'ecoscan_') {
+    this.prefix = prefix;
+  }
 
-    // Unusual file uploads
-    const uploadAttempts = recentActivities
-      .filter(activity => activity.type === 'file_upload');
-
-    if (uploadAttempts.length > 20) {
-      console.warn('Security: Unusual number of file uploads detected');
+  set(key: string, value: any): boolean {
+    try {
+      const sanitizedKey = this.sanitizeKey(key);
+      const serializedValue = JSON.stringify(value);
+      localStorage.setItem(this.prefix + sanitizedKey, serializedValue);
+      return true;
+    } catch (error) {
+      console.warn('Failed to store data:', error);
+      return false;
     }
   }
 
-  /**
-   * Get security report
-   */
-  getSecurityReport(): any {
-    const now = Date.now();
-    const last24Hours = now - 24 * 60 * 60 * 1000;
-    
-    const recentActivities = this.suspiciousActivities
-      .filter(activity => activity.timestamp > last24Hours);
-
-    const activityCounts = recentActivities.reduce((counts, activity) => {
-      counts[activity.type] = (counts[activity.type] || 0) + 1;
-      return counts;
-    }, {} as Record<string, number>);
-
-    return {
-      totalActivities: recentActivities.length,
-      activityBreakdown: activityCounts,
-      riskLevel: this.calculateRiskLevel(recentActivities)
-    };
+  get<T>(key: string, defaultValue?: T): T | null {
+    try {
+      const sanitizedKey = this.sanitizeKey(key);
+      const item = localStorage.getItem(this.prefix + sanitizedKey);
+      return item ? JSON.parse(item) : defaultValue || null;
+    } catch (error) {
+      console.warn('Failed to retrieve data:', error);
+      return defaultValue || null;
+    }
   }
 
-  private calculateRiskLevel(activities: any[]): 'low' | 'medium' | 'high' {
-    if (activities.length > 100) return 'high';
-    if (activities.length > 50) return 'medium';
-    return 'low';
+  remove(key: string): boolean {
+    try {
+      const sanitizedKey = this.sanitizeKey(key);
+      localStorage.removeItem(this.prefix + sanitizedKey);
+      return true;
+    } catch (error) {
+      console.warn('Failed to remove data:', error);
+      return false;
+    }
+  }
+
+  clear(): boolean {
+    try {
+      Object.keys(localStorage)
+        .filter(key => key.startsWith(this.prefix))
+        .forEach(key => localStorage.removeItem(key));
+      return true;
+    } catch (error) {
+      console.warn('Failed to clear data:', error);
+      return false;
+    }
+  }
+
+  private sanitizeKey(key: string): string {
+    return key.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
   }
 }
 
-// Global security monitor instance
-export const securityMonitor = new SecurityMonitor(); 
+/**
+ * Check if running in secure context
+ */
+export function isSecureContext(): boolean {
+  return typeof window !== 'undefined' && 
+         (window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost');
+}
+
+/**
+ * Validate camera permissions securely
+ */
+export async function validateCameraPermissions(): Promise<{
+  hasPermission: boolean;
+  error?: string;
+}> {
+  if (!isSecureContext()) {
+    return {
+      hasPermission: false,
+      error: 'Camera access requires HTTPS or localhost'
+    };
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return {
+      hasPermission: false,
+      error: 'Camera API not supported'
+    };
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { 
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      } 
+    });
+    
+    // Immediately stop the stream
+    stream.getTracks().forEach(track => track.stop());
+    
+    return { hasPermission: true };
+  } catch (error) {
+    return {
+      hasPermission: false,
+      error: error instanceof Error ? error.message : 'Camera access denied'
+    };
+  }
+}
+
+/**
+ * Secure error reporting
+ */
+export function sanitizeError(error: Error): {
+  message: string;
+  stack?: string;
+  timestamp: number;
+} {
+  return {
+    message: sanitizeInput(error.message),
+    stack: error.stack ? sanitizeInput(error.stack.slice(0, 500)) : undefined,
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Input validation schemas
+ */
+export const ValidationSchemas = {
+  voiceInput: {
+    minLength: 1,
+    maxLength: 200,
+    pattern: /^[a-zA-Z0-9\s\-.,!?]+$/
+  },
+  
+  fileName: {
+    minLength: 1,
+    maxLength: 100,
+    pattern: /^[a-zA-Z0-9._\-]+$/
+  },
+  
+  analyticsEvent: {
+    minLength: 1,
+    maxLength: 50,
+    pattern: /^[a-zA-Z0-9_\-]+$/
+  }
+};
+
+/**
+ * Validate input against schema
+ */
+export function validateInput(
+  input: string, 
+  schema: typeof ValidationSchemas.voiceInput
+): { isValid: boolean; error?: string } {
+  if (typeof input !== 'string') {
+    return { isValid: false, error: 'Input must be a string' };
+  }
+
+  if (input.length < schema.minLength) {
+    return { isValid: false, error: `Input too short (min: ${schema.minLength})` };
+  }
+
+  if (input.length > schema.maxLength) {
+    return { isValid: false, error: `Input too long (max: ${schema.maxLength})` };
+  }
+
+  if (!schema.pattern.test(input)) {
+    return { isValid: false, error: 'Input contains invalid characters' };
+  }
+
+  return { isValid: true };
+}
+
+// Global security instance
+export const secureStorage = new SecureStorage();
+export const rateLimiter = new RateLimiter(); 
