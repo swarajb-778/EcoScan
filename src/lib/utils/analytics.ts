@@ -174,6 +174,23 @@ class AnalyticsManager {
    * Track performance metrics
    */
   trackPerformance(metric: string, value: number, unit = 'ms'): void {
+    if (typeof value !== 'number' || isNaN(value)) {
+      console.warn(`Invalid metric value for ${metric}:`, value);
+      return;
+    }
+    // Clamp extreme values
+    if (metric === 'fps') {
+      if (value <= 0 || value > 120) {
+        console.warn('FPS metric out of range:', value);
+        return;
+      }
+    }
+    if (metric === 'inferenceTime') {
+      if (value < 0 || value > 2000) {
+        console.warn('Inference time metric out of range:', value);
+        return;
+      }
+    }
     this.trackEvent('performance_metric', {
       metric,
       value,
@@ -628,4 +645,29 @@ export class PerformanceMonitor {
   }
 }
 
-export const performanceMonitor = new PerformanceMonitor(); 
+export const performanceMonitor = new PerformanceMonitor();
+
+export function recordPerformanceMetric(name: string, value: number) {
+  if (typeof value !== 'number' || isNaN(value)) {
+    console.warn(`Invalid metric value for ${name}:`, value);
+    return;
+  }
+  // Clamp extreme values
+  if (name === 'fps') {
+    if (value <= 0 || value > 120) {
+      console.warn('FPS metric out of range:', value);
+      return;
+    }
+  }
+  if (name === 'inferenceTime') {
+    if (value < 0 || value > 2000) {
+      console.warn('Inference time metric out of range:', value);
+      return;
+    }
+  }
+  // ... existing code ...
+}
+
+export function isMetricsSupported(): boolean {
+  return typeof window !== 'undefined' && 'performance' in window && 'now' in window.performance;
+} 
