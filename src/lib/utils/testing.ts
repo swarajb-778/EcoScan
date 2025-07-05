@@ -707,4 +707,28 @@ export const testUtils = {
   generateTestData: TestDataGenerator,
   
   visual: VisualTestHelper
-}; 
+};
+
+export function mockCameraPermissionDenied() {
+  return Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+}
+
+export function mockNoCameraPresent() {
+  return Promise.resolve([]); // No video input devices
+}
+
+export function mockCorruptImageFile() {
+  return new File(['corruptdata'], 'corrupt.jpg', { type: 'image/jpeg' });
+}
+
+export function mockUnsupportedVoiceRecognition() {
+  return undefined;
+}
+
+export function mockBatchUploadLimitExceeded() {
+  const files = [];
+  for (let i = 0; i < 10; i++) {
+    files.push(new File(['dummy'], `file${i}.jpg`, { type: 'image/jpeg' }));
+  }
+  return files;
+} 
