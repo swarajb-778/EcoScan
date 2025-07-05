@@ -13,6 +13,7 @@
     updatePerformanceMetric
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
+  import { getQRScanSupportMessage } from '$lib/utils/qr.js';
 
   let videoElement: HTMLVideoElement;
   let canvasElement: HTMLCanvasElement;
@@ -65,27 +66,35 @@
   }
 
   async function startCamera() {
+    setLoadingState(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment', // Use back camera on mobile
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      });
-
-      videoElement.srcObject = stream;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError('Camera access is not supported in this browser.');
+        return;
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter(d => d.kind === 'videoinput');
+      if (videoInputs.length === 0) {
+        setError('No camera device found. Please connect a camera and try again.');
+        return;
+      }
+      // Try to get user media
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       setCameraStream(stream);
-      permissionsGranted.set(true);
-      
-      videoElement.addEventListener('loadedmetadata', () => {
-        setupCanvas();
-        startDetectionLoop();
-      });
-
-    } catch (error) {
-      setError('Camera access denied. Please grant camera permissions and try again.');
-      console.error('Camera access error:', error);
+      videoElement.srcObject = stream;
+      videoElement.onloadedmetadata = () => videoElement.play();
+      // Handle stream interruption
+      stream.getVideoTracks()[0].onended = () => {
+        setError('Camera stream was interrupted. Please refresh or re-enable your camera.');
+      };
+    } catch (err: any) {
+      if (err && err.name === 'NotAllowedError') {
+        setError('Camera permission denied. Please allow camera access in your browser settings.');
+      } else {
+        setError('Failed to access camera: ' + (err?.message || err));
+      }
+    } finally {
+      setLoadingState(false);
     }
   }
 
