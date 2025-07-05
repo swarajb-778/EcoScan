@@ -271,34 +271,38 @@ export function generateOfflineQR(options: QRCodeOptions = {}): QRCodeResult {
 }
 
 /**
- * Validate QR code content
+ * Validate and handle QR code content edge cases
  */
-export function validateQRContent(content: string): {
-  valid: boolean;
-  type: 'url' | 'text' | 'json';
-  data?: any;
-} {
-  // Check if it's a URL
+export function safeParseQRContent(content: string): { valid: boolean; type: 'url' | 'text' | 'json' | 'invalid'; data?: any; error?: string } {
   try {
+    // Try URL
     new URL(content);
     return { valid: true, type: 'url', data: content };
-  } catch {
-    // Not a URL, continue checking
-  }
-
-  // Check if it's JSON
+  } catch {}
   try {
+    // Try JSON
     const data = JSON.parse(content);
     return { valid: true, type: 'json', data };
-  } catch {
-    // Not JSON, treat as text
+  } catch {}
+  // Check for empty or too long
+  if (!content || content.length > 4296) {
+    return { valid: false, type: 'invalid', error: 'QR code content is empty or too long.' };
   }
+  // Fallback: treat as text
+  if (/[^\w\s-]/.test(content)) {
+    return { valid: false, type: 'invalid', error: 'QR code contains invalid characters.' };
+  }
+  return { valid: true, type: 'text', data: content };
+}
 
-  return { 
-    valid: content.length > 0 && content.length <= 4296, // QR code max capacity
-    type: 'text',
-    data: content
-  };
+/**
+ * Show user-friendly error for unsupported QR scanning
+ */
+export function getQRScanSupportMessage(): string {
+  if (!('BarcodeDetector' in window)) {
+    return 'QR code scanning is not supported in this browser. Please use a modern browser or scan with your device camera.';
+  }
+  return '';
 }
 
 /**
