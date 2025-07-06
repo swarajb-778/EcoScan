@@ -1,5 +1,6 @@
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
+import { webglManager } from '../utils/webgl-manager.js';
 
 // Model integrity and fallback configuration
 interface ModelIntegrity {
@@ -24,6 +25,7 @@ export class ObjectDetector {
   private integrity: ModelIntegrity;
   private isInitialized = false;
   private verificationWorker?: Worker;
+  private webglRecoveryBound: () => Promise<void>;
 
   constructor(config: ModelConfig) {
     this.modelConfig = config;
@@ -44,6 +46,129 @@ export class ObjectDetector {
         '/models/basic-detector.onnx'
       ]
     };
+
+    // Bind WebGL recovery callback
+    this.webglRecoveryBound = this.handleWebGLRecovery.bind(this);
+    this.setupWebGLIntegration();
+  }
+
+  private setupWebGLIntegration(): void {
+    // Register for WebGL context recovery
+    webglManager.addRecoveryCallback(this.webglRecoveryBound);
+
+    // Listen for WebGL events with proper typing
+    window.addEventListener('webgl-context-lost', this.handleWebGLLoss.bind(this) as EventListener);
+    window.addEventListener('webgl-context-restored', this.handleWebGLRestore.bind(this) as EventListener);
+    window.addEventListener('gpu-memory-pressure', ((event: Event) => {
+      this.handleMemoryPressure(event as CustomEvent);
+    }) as EventListener);
+  }
+
+  private handleWebGLLoss(): void {
+    console.warn('🔥 WebGL context lost - ML inference paused');
+    this.isInitialized = false;
+    
+    // Don't dispose session immediately - it might recover
+    // Just mark as not initialized to prevent new inferences
+  }
+
+  private handleWebGLRestore(): void {
+    console.log('🔄 WebGL context restored - attempting ML recovery');
+    // Recovery will be handled by the recovery callback
+  }
+
+  private async handleWebGLRecovery(): Promise<void> {
+    console.log('🔄 Recovering ML detector after WebGL context restore');
+    
+    try {
+      // Check if we need to recreate the session
+      if (this.session) {
+        try {
+          // Test if existing session still works
+          const testData = new Float32Array(1 * 3 * 32 * 32).fill(0.5);
+          const testTensor = new Tensor('float32', testData, [1, 3, 32, 32]);
+          await this.session.run({ images: testTensor });
+          
+          // If we get here, session is still valid
+          this.isInitialized = true;
+          console.log('✅ Existing ML session recovered successfully');
+          return;
+        } catch (error) {
+          console.warn('Existing session invalid, recreating:', error);
+          this.session = null;
+        }
+      }
+
+      // Recreate the session with WebGL context check
+      if (webglManager.isContextAvailable()) {
+        await this.initializeWithContext();
+      } else {
+        console.warn('WebGL context not available, deferring ML recovery');
+      }
+    } catch (error) {
+      console.error('ML detector recovery failed:', error);
+      this.modelState.failureCount++;
+    }
+  }
+
+  private handleMemoryPressure(event: CustomEvent): void {
+    console.warn('💾 GPU memory pressure - optimizing ML detector');
+    
+    const { memoryUsage, limit } = event.detail;
+    
+    // Reduce model complexity if needed
+    if (memoryUsage > limit * 0.95) {
+      this.optimizeForLowMemory();
+    }
+  }
+
+  private optimizeForLowMemory(): void {
+    // Switch to a smaller model if available
+    if (this.modelState.fallbackIndex < this.integrity.fallbackModels.length - 1) {
+      console.log('Switching to smaller model due to memory pressure');
+      this.modelState.fallbackIndex++;
+      this.modelState.currentModel = this.integrity.fallbackModels[this.modelState.fallbackIndex];
+      
+      // Recreate session with smaller model
+      this.reinitialize();
+    }
+  }
+
+  private async reinitialize(): Promise<void> {
+    this.isInitialized = false;
+    if (this.session) {
+      this.session = null;
+    }
+    await this.initialize();
+  }
+
+  private async initializeWithContext(): Promise<void> {
+    // Enhanced initialization with WebGL context awareness
+    const webglState = webglManager.getState();
+    const webglConfig = webglManager.getConfig();
+    
+    // Adjust execution providers based on WebGL state
+    let executionProviders: string[] = ['wasm'];
+    
+    if (webglManager.isContextAvailable() && !webglState.isRecovering) {
+      executionProviders.unshift('webgl');
+    }
+    
+    // Adjust session options based on GPU capabilities
+    const sessionOptions: any = {
+      executionProviders,
+      graphOptimizationLevel: 'all',
+      enableMemPattern: false,
+      enableCpuMemArena: false
+    };
+
+    // Reduce memory usage if needed
+    if (webglState.memoryUsage > webglConfig.memoryLimit * 0.8) {
+      sessionOptions.graphOptimizationLevel = 'basic';
+      sessionOptions.enableMemPattern = true;
+    }
+
+    this.session = await InferenceSession.create(this.modelState.currentModel, sessionOptions);
   }
 
   async initialize(): Promise<void> {
@@ -52,6 +177,11 @@ export class ObjectDetector {
     
     while (attempts < maxAttempts) {
       try {
+        // Check WebGL availability first
+        if (!webglManager.isContextAvailable()) {
+          console.warn('WebGL context not available, using CPU-only inference');
+        }
+
         // Verify model integrity before loading
         const isIntact = await this.verifyModelIntegrity(this.modelState.currentModel);
         if (!isIntact) {
@@ -63,13 +193,8 @@ export class ObjectDetector {
           }
         }
 
-        // Load the model with enhanced error handling
-        this.session = await InferenceSession.create(this.modelState.currentModel, {
-          executionProviders: ['webgl', 'wasm'],
-          graphOptimizationLevel: 'all',
-          enableMemPattern: false, // Prevent memory corruption
-          enableCpuMemArena: false // Better memory management
-        });
+        // Load the model with WebGL context awareness
+        await this.initializeWithContext();
 
         // Verify model is functional with test inference
         await this.verifyModelFunctionality();
@@ -84,6 +209,14 @@ export class ObjectDetector {
         attempts++;
         this.modelState.failureCount++;
         console.error(`❌ Failed to load YOLO model (attempt ${attempts}):`, error);
+        
+        // Check if this is a WebGL-related error
+        if (this.isWebGLError(error)) {
+          console.warn('WebGL error detected, falling back to CPU inference');
+          // Force CPU-only mode
+          await this.fallbackToCPU();
+          continue;
+        }
         
         // Check if this is a corruption issue
         if (this.isCorruptionError(error)) {
@@ -101,6 +234,32 @@ export class ObjectDetector {
         // Progressive backoff
         await this.delay(Math.pow(2, attempts) * 1000);
       }
+    }
+  }
+
+  private isWebGLError(error: any): boolean {
+    const webglIndicators = [
+      'webgl',
+      'context lost',
+      'gpu',
+      'graphics',
+      'rendering context',
+      'execution provider'
+    ];
+    
+    const errorMessage = error?.message?.toLowerCase() || '';
+    return webglIndicators.some(indicator => errorMessage.includes(indicator));
+  }
+
+  private async fallbackToCPU(): Promise<void> {
+    try {
+      this.session = await InferenceSession.create(this.modelState.currentModel, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all'
+      });
+      console.log('✅ Fallback to CPU inference successful');
+    } catch (error) {
+      throw new Error(`CPU fallback failed: ${error}`);
     }
   }
 
@@ -210,6 +369,12 @@ export class ObjectDetector {
       throw new Error('Model not initialized. Call initialize() first.');
     }
 
+    // Check WebGL context before inference
+    if (!webglManager.isContextAvailable()) {
+      console.warn('WebGL context lost during inference, attempting recovery');
+      throw new Error('WebGL context not available for inference');
+    }
+
     // Check if model needs re-verification
     if (Date.now() - this.modelState.lastVerified > 300000) { // 5 minutes
       this.modelState.lastVerified = Date.now();
@@ -218,13 +383,27 @@ export class ObjectDetector {
     try {
       const preprocessedTensor = this.preprocessImage(imageData);
       
-      // Add timeout and memory monitoring
+      // Add timeout and memory monitoring with WebGL awareness
       const inferencePromise = this.session.run({ images: preprocessedTensor });
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Inference timeout')), 10000);
       });
       
-      const results = await Promise.race([inferencePromise, timeoutPromise]);
+      // Monitor for WebGL context loss during inference
+      const contextLossPromise = new Promise((_, reject) => {
+        const handleLoss = () => {
+          window.removeEventListener('webgl-context-lost', handleLoss);
+          reject(new Error('WebGL context lost during inference'));
+        };
+        window.addEventListener('webgl-context-lost', handleLoss);
+        
+        // Clean up listener after inference
+        setTimeout(() => {
+          window.removeEventListener('webgl-context-lost', handleLoss);
+        }, 10000);
+      });
+      
+      const results = await Promise.race([inferencePromise, timeoutPromise, contextLossPromise]);
       let detections = this.postprocessResults(results, imageData.width, imageData.height);
       
       // Enhanced detection limits and warnings
@@ -244,6 +423,12 @@ export class ObjectDetector {
     } catch (error) {
       this.modelState.failureCount++;
       console.error('❌ Detection failed:', error);
+      
+      // Handle WebGL-specific errors
+      if (this.isWebGLError(error)) {
+        console.warn('WebGL error during detection, context may be lost');
+        this.isInitialized = false;
+      }
       
       // Check for potential corruption after multiple failures
       if (this.modelState.failureCount > 10) {
@@ -430,10 +615,20 @@ export class ObjectDetector {
   }
 
   dispose(): void {
+    // Clean up WebGL integration with proper typing
+    webglManager.removeRecoveryCallback(this.webglRecoveryBound);
+    window.removeEventListener('webgl-context-lost', this.handleWebGLLoss.bind(this) as EventListener);
+    window.removeEventListener('webgl-context-restored', this.handleWebGLRestore.bind(this) as EventListener);
+    window.removeEventListener('gpu-memory-pressure', ((event: Event) => {
+      this.handleMemoryPressure(event as CustomEvent);
+    }) as EventListener);
+
+    // Dispose session
     if (this.session) {
-      this.session.release();
       this.session = null;
-      this.isInitialized = false;
     }
+    
+    this.isInitialized = false;
+    console.log('ObjectDetector disposed');
   }
 } 
