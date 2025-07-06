@@ -1,0 +1,119 @@
+{
+  "version": "1.1.0",
+  "region": "CA",
+  "timestamp": 1703678400000,
+  "objects": {
+    "plastic_bottle": {
+      "category": "blue_bin",
+      "confidence": 0.95,
+      "instructions": "Remove cap and label, rinse container. Place in blue recycling bin.",
+      "tips": "Check your municipal recycling program - guidelines vary by province.",
+      "regional_variants": {
+        "ON": {
+          "instructions": "Empty and rinse. Blue bin collection every other week in most municipalities."
+        },
+        "BC": {
+          "instructions": "Return to depot or curbside collection. Part of BC's Extended Producer Responsibility program."
+        },
+        "QC": {
+          "instructions": "Vider et rincer. Placer dans le bac de recyclage selon les directives municipales."
+        }
+      }
+    },
+    "glass_bottle": {
+      "category": "glass_recycling",
+      "confidence": 0.92,
+      "instructions": "Remove cap and labels. Many provinces have bottle deposit programs.",
+      "tips": "Check for deposit symbols - return to beer/liquor stores for refund where applicable."
+    },
+    "aluminum_can": {
+      "category": "metal_recycling",
+      "confidence": 0.94,
+      "instructions": "Empty and rinse. Most provinces include in curbside recycling programs.",
+      "tips": "Alberta has beverage container deposit program - return for 5-25¢ refund."
+    },
+    "paper_cup": {
+      "category": "garbage",
+      "confidence": 0.87,
+      "instructions": "Most paper cups have plastic lining - dispose in regular garbage.",
+      "tips": "Some municipalities accept in organics if certified compostable."
+    },
+    "food_waste": {
+      "category": "organics",
+      "confidence": 0.89,
+      "instructions": "Place in green bin organics program where available.",
+      "tips": "Composting programs vary - check if your municipality has curbside organics collection."
+    },
+    "electronic_device": {
+      "category": "e_waste",
+      "confidence": 0.91,
+      "instructions": "Take to municipal hazardous waste depot or manufacturer take-back program.",
+      "tips": "Many provinces have Extended Producer Responsibility for electronics."
+    },
+    "battery": {
+      "category": "hazardous_waste",
+      "confidence": 0.93,
+      "instructions": "Return to collection points at retailers or municipal facilities.",
+      "tips": "Call2Recycle program accepts household batteries at many locations across Canada."
+    },
+    "tim_hortons_cup": {
+      "category": "garbage",
+      "confidence": 0.88,
+      "instructions": "Tim Hortons cups are not recyclable in most programs - dispose in garbage.",
+      "tips": "Bring a reusable cup for environmental impact reduction and potential discount."
+    },
+    "cardboard_box": {
+      "category": "blue_bin",
+      "confidence": 0.96,
+      "instructions": "Flatten and remove tape/staples. Place in recycling bin.",
+      "tips": "Cardboard is widely accepted in municipal recycling programs across Canada."
+    },
+    "plastic_bag": {
+      "category": "soft_plastics",
+      "confidence": 0.88,
+      "instructions": "Take to grocery store collection bins - not accepted in curbside recycling.",
+      "tips": "Loblaws, Metro, and other retailers have plastic bag collection programs."
+    },
+    "milk_carton": {
+      "category": "blue_bin",
+      "confidence": 0.91,
+      "instructions": "Empty and rinse. Most provinces accept in curbside recycling.",
+      "tips": "Tetra Pak cartons are recyclable at specialized facilities in most regions."
+    }
+  },
+  "keywords": {
+    "bottle": ["plastic_bottle", "glass_bottle"],
+    "can": ["aluminum_can"],
+    "cup": ["paper_cup", "tim_hortons_cup"],
+    "food": ["food_waste"],
+    "electronics": ["electronic_device"],
+    "battery": ["battery"],
+    "coffee": ["tim_hortons_cup"],
+    "box": ["cardboard_box"],
+    "bag": ["plastic_bag"],
+    "milk": ["milk_carton"],
+    "carton": ["milk_carton"],
+    "tim": ["tim_hortons_cup"],
+    "timmies": ["tim_hortons_cup"]
+  },
+  "metadata": {
+    "total_entries": 11,
+    "regions_supported": ["CA", "ON", "BC", "QC", "AB", "NS", "NB", "MB", "SK"],
+    "languages": ["en", "fr"],
+    "disposal_categories": [
+      "blue_bin",
+      "glass_recycling",
+      "metal_recycling", 
+      "organics",
+      "garbage",
+      "e_waste",
+      "hazardous_waste",
+      "soft_plastics"
+    ],
+    "provincial_programs": {
+      "deposit_programs": ["AB", "BC", "SK", "NS", "NB"],
+      "organics_programs": ["ON", "BC", "QC", "NS", "NB"],
+      "extended_producer_responsibility": ["BC", "ON", "QC"]
+    }
+  }
+} 

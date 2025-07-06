@@ -1,0 +1,110 @@
+{
+  "version": "1.1.0",
+  "region": "EU",
+  "timestamp": 1703678400000,
+  "objects": {
+    "plastic_bottle": {
+      "category": "yellow_bin",
+      "confidence": 0.95,
+      "instructions": "Remove cap and label, rinse container. Place in yellow recycling bin.",
+      "tips": "Check local Duales System Deutschland (DSD) guidelines for specific requirements.",
+      "regional_variants": {
+        "DE": {
+          "category": "gelbe_tonne",
+          "instructions": "Entfernen Sie Deckel und Etikett, spülen Sie den Behälter aus. In die gelbe Tonne."
+        },
+        "FR": {
+          "instructions": "Retirer le bouchon et l'étiquette, rincer le récipient. Placer dans le bac jaune."
+        }
+      }
+    },
+    "glass_bottle": {
+      "category": "glass_recycling",
+      "confidence": 0.92,
+      "instructions": "Remove cap and cork. Sort by color: clear, brown, or green glass containers.",
+      "tips": "Use designated glass collection points. Do not mix with window glass or mirrors."
+    },
+    "aluminum_can": {
+      "category": "metal_recycling",
+      "confidence": 0.94,
+      "instructions": "Empty completely and rinse. Place in designated metal recycling container.",
+      "tips": "Aluminum is infinitely recyclable - one of the most valuable recyclable materials."
+    },
+    "paper_cup": {
+      "category": "residual_waste",
+      "confidence": 0.87,
+      "instructions": "Most paper cups have plastic lining - dispose in residual waste bin.",
+      "tips": "Look for certified compostable cups which can go in organic waste in some regions."
+    },
+    "food_waste": {
+      "category": "organic_waste",
+      "confidence": 0.89,
+      "instructions": "Place in brown organic waste bin. Remove any packaging first.",
+      "tips": "Composting reduces methane emissions from landfills significantly."
+    },
+    "electronic_device": {
+      "category": "e_waste",
+      "confidence": 0.91,
+      "instructions": "Take to WEEE collection point or electronics retailer for proper recycling.",
+      "tips": "Contains valuable metals and hazardous materials requiring special handling."
+    },
+    "battery": {
+      "category": "hazardous_waste",
+      "confidence": 0.93,
+      "instructions": "Return to collection point at shops or municipal facility. Never dispose in regular bins.",
+      "tips": "Batteries contain toxic materials and valuable metals for recovery."
+    },
+    "coffee_pod": {
+      "category": "residual_waste",
+      "confidence": 0.85,
+      "instructions": "Most coffee pods are not recyclable due to mixed materials. Dispose in residual waste.",
+      "tips": "Consider reusable coffee systems or look for certified compostable pods."
+    },
+    "cardboard_box": {
+      "category": "paper_recycling",
+      "confidence": 0.96,
+      "instructions": "Flatten and remove tape/staples. Place in paper recycling container.",
+      "tips": "Cardboard is highly recyclable and reduces forest pressure when recycled."
+    },
+    "plastic_bag": {
+      "category": "plastic_film_recycling",
+      "confidence": 0.88,
+      "instructions": "Take to designated plastic film collection points at supermarkets.",
+      "tips": "Never place in regular recycling - can jam sorting machinery."
+    }
+  },
+  "keywords": {
+    "bottle": ["plastic_bottle", "glass_bottle"],
+    "can": ["aluminum_can"],
+    "cup": ["paper_cup"],
+    "food": ["food_waste"],
+    "electronics": ["electronic_device"],
+    "battery": ["battery"],
+    "coffee": ["coffee_pod"],
+    "box": ["cardboard_box"],
+    "bag": ["plastic_bag"],
+    "kunststoff": ["plastic_bottle", "plastic_bag"],
+    "glas": ["glass_bottle"],
+    "papier": ["cardboard_box", "paper_cup"],
+    "metall": ["aluminum_can"],
+    "elektronik": ["electronic_device"],
+    "batterie": ["battery"],
+    "organisch": ["food_waste"]
+  },
+  "metadata": {
+    "total_entries": 10,
+    "regions_supported": ["EU", "DE", "FR", "NL", "BE", "AT"],
+    "languages": ["en", "de", "fr", "nl"],
+    "disposal_categories": [
+      "yellow_bin",
+      "glass_recycling", 
+      "metal_recycling",
+      "paper_recycling",
+      "organic_waste",
+      "residual_waste",
+      "e_waste",
+      "hazardous_waste",
+      "plastic_film_recycling"
+    ]
+  }
+} 
