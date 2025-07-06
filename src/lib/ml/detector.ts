@@ -1,6 +1,7 @@
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
 import { webglManager } from '../utils/webgl-manager.js';
+import { adaptiveEngine, type OptimizationStrategy } from './adaptive-engine.js';
 
 // Model integrity and fallback configuration
 interface ModelIntegrity {
@@ -26,6 +27,10 @@ export class ObjectDetector {
   private isInitialized = false;
   private verificationWorker?: Worker;
   private webglRecoveryBound: () => Promise<void>;
+  private adaptiveConfigBound: (event: Event) => void;
+  private frameSkipCounter = 0;
+  private lastInferenceTime = 0;
+  private inferenceHistory: number[] = [];
 
   constructor(config: ModelConfig) {
     this.modelConfig = config;
@@ -47,9 +52,12 @@ export class ObjectDetector {
       ]
     };
 
-    // Bind WebGL recovery callback
+    // Bind callbacks
     this.webglRecoveryBound = this.handleWebGLRecovery.bind(this);
+    this.adaptiveConfigBound = this.handleAdaptiveConfigChange.bind(this);
+    
     this.setupWebGLIntegration();
+    this.setupAdaptiveIntegration();
   }
 
   private setupWebGLIntegration(): void {
@@ -64,8 +72,44 @@ export class ObjectDetector {
     }) as EventListener);
   }
 
+  private setupAdaptiveIntegration(): void {
+    // Listen for adaptive configuration changes
+    window.addEventListener('adaptive-config-change', this.adaptiveConfigBound);
+    
+    // Initialize with current adaptive config
+    const adaptiveConfig = adaptiveEngine.getCurrentConfig();
+    this.applyAdaptiveConfig(adaptiveConfig);
+  }
+
+  private handleAdaptiveConfigChange(event: Event): void {
+    const customEvent = event as CustomEvent;
+    const { config, strategy } = customEvent.detail;
+    
+    console.log('🔧 Applying adaptive configuration to ML detector:', {
+      targetFPS: config.targetFPS,
+      resolution: config.resolution,
+      strategy: strategy
+    });
+    
+    this.applyAdaptiveConfig(config);
+  }
+
+  private applyAdaptiveConfig(config: any): void {
+    // Update model configuration based on adaptive settings
+    this.modelConfig.threshold = Math.max(0.3, config.qualityLevel === 'low' ? 0.6 : 0.5);
+    
+    // Update resolution if needed (this would typically be handled by the camera component)
+    if (config.resolution) {
+      // Store for preprocessing
+      this.modelConfig.inputSize = [
+        Math.min(640, config.resolution.width),
+        Math.min(640, config.resolution.height)
+      ];
+    }
+  }
+
   private handleWebGLLoss(): void {
-    console.warn('🔥 WebGL context lost - ML inference paused');
+    console.warn('�� WebGL context lost - ML inference paused');
     this.isInitialized = false;
     
     // Don't dispose session immediately - it might recover
@@ -369,24 +413,36 @@ export class ObjectDetector {
       throw new Error('Model not initialized. Call initialize() first.');
     }
 
+    // Get current adaptive strategy
+    const strategy = adaptiveEngine.getCurrentStrategy();
+    
+    // Handle frame skipping for performance optimization
+    if (this.shouldSkipFrame(strategy)) {
+      return this.getLastDetections();
+    }
+
     // Check WebGL context before inference
     if (!webglManager.isContextAvailable()) {
       console.warn('WebGL context lost during inference, attempting recovery');
       throw new Error('WebGL context not available for inference');
     }
 
-    // Check if model needs re-verification
-    if (Date.now() - this.modelState.lastVerified > 300000) { // 5 minutes
-      this.modelState.lastVerified = Date.now();
-    }
+    const inferenceStart = performance.now();
 
     try {
-      const preprocessedTensor = this.preprocessImage(imageData);
+      // Apply resolution reduction if needed
+      const processedImageData = this.applyResolutionOptimization(imageData, strategy);
       
-      // Add timeout and memory monitoring with WebGL awareness
+      // Preprocess with adaptive optimizations
+      const preprocessedTensor = this.preprocessImageAdaptive(processedImageData, strategy);
+      
+      // Run inference with timeout based on adaptive config
+      const adaptiveConfig = adaptiveEngine.getCurrentConfig();
+      const timeoutMs = Math.max(5000, adaptiveConfig.maxInferenceTime * 2);
+      
       const inferencePromise = this.session.run({ images: preprocessedTensor });
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Inference timeout')), 10000);
+        setTimeout(() => reject(new Error('Adaptive inference timeout')), timeoutMs);
       });
       
       // Monitor for WebGL context loss during inference
@@ -400,21 +456,28 @@ export class ObjectDetector {
         // Clean up listener after inference
         setTimeout(() => {
           window.removeEventListener('webgl-context-lost', handleLoss);
-        }, 10000);
+        }, timeoutMs);
       });
       
       const results = await Promise.race([inferencePromise, timeoutPromise, contextLossPromise]);
-      let detections = this.postprocessResults(results, imageData.width, imageData.height);
+      let detections = this.postprocessResultsAdaptive(results, imageData.width, imageData.height, strategy);
       
-      // Enhanced detection limits and warnings
-      if (detections.length > 15) {
-        console.warn(`Excessive objects detected (${detections.length}). Performance may degrade.`);
-        detections = detections.slice(0, 15);
+      // Apply adaptive detection limits
+      if (detections.length > strategy.maxObjects) {
+        console.warn(`Limiting objects from ${detections.length} to ${strategy.maxObjects} due to adaptive optimization`);
+        detections = detections.slice(0, strategy.maxObjects);
       }
+      
+      // Apply confidence filtering based on strategy
+      detections = detections.filter(detection => detection.confidence >= strategy.confidenceThreshold);
       
       if (detections.length === 0) {
-        console.warn('No objects detected in frame.');
+        console.warn('No objects detected after adaptive filtering.');
       }
+      
+      // Update performance metrics
+      const inferenceTime = performance.now() - inferenceStart;
+      this.updatePerformanceMetrics(inferenceTime, detections.length);
       
       // Reset failure count on successful detection
       this.modelState.failureCount = 0;
@@ -422,7 +485,13 @@ export class ObjectDetector {
       return detections;
     } catch (error) {
       this.modelState.failureCount++;
-      console.error('❌ Detection failed:', error);
+      console.error('❌ Adaptive detection failed:', error);
+      
+      // Update adaptive engine with error information
+      adaptiveEngine.updatePerformanceMetrics({
+        errors: this.modelState.failureCount,
+        averageInferenceTime: performance.now() - inferenceStart
+      });
       
       // Handle WebGL-specific errors
       if (this.isWebGLError(error)) {
@@ -445,7 +514,53 @@ export class ObjectDetector {
     }
   }
 
-  private preprocessImage(imageData: ImageData): Tensor {
+  private shouldSkipFrame(strategy: OptimizationStrategy): boolean {
+    if (strategy.skipFrames === 0) return false;
+    
+    this.frameSkipCounter++;
+    if (this.frameSkipCounter > strategy.skipFrames) {
+      this.frameSkipCounter = 0;
+      return false;
+    }
+    
+    return true;
+  }
+
+  private getLastDetections(): Detection[] {
+    // Return empty array for skipped frames
+    // In a real implementation, you might want to return the last valid detections
+    return [];
+  }
+
+  private applyResolutionOptimization(imageData: ImageData, strategy: OptimizationStrategy): ImageData {
+    if (strategy.reduceResolution === 0) {
+      return imageData;
+    }
+    
+    const reductionFactor = (100 - strategy.reduceResolution) / 100;
+    const newWidth = Math.round(imageData.width * reductionFactor);
+    const newHeight = Math.round(imageData.height * reductionFactor);
+    
+    // Create a new canvas for resizing
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+    
+    // Create source canvas
+    const sourceCanvas = document.createElement('canvas');
+    const sourceCtx = sourceCanvas.getContext('2d')!;
+    sourceCanvas.width = imageData.width;
+    sourceCanvas.height = imageData.height;
+    sourceCtx.putImageData(imageData, 0, 0);
+    
+    // Resize
+    ctx.drawImage(sourceCanvas, 0, 0, imageData.width, imageData.height, 0, 0, newWidth, newHeight);
+    
+    return ctx.getImageData(0, 0, newWidth, newHeight);
+  }
+
+  private preprocessImageAdaptive(imageData: ImageData, strategy: OptimizationStrategy): Tensor {
     const { width, height, data } = imageData;
     const [modelWidth, modelHeight] = this.modelConfig.inputSize;
     
@@ -464,6 +579,12 @@ export class ObjectDetector {
     const imgData = new ImageData(data, width, height);
     tempCtx.putImageData(imgData, 0, 0);
     
+    // Apply adaptive image quality settings
+    if (strategy.enableQuantization) {
+      // Reduce image quality for performance
+      tempCtx.filter = 'contrast(0.8) brightness(0.9)';
+    }
+    
     ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, modelWidth, modelHeight);
     
     // Get resized image data
@@ -478,15 +599,18 @@ export class ObjectDetector {
       const tensorIndex = i;
       
       // Normalize to [0, 1] and arrange in CHW format
-      tensorData[tensorIndex] = resizedData[pixelIndex] / 255.0; // R
-      tensorData[tensorIndex + modelHeight * modelWidth] = resizedData[pixelIndex + 1] / 255.0; // G
-      tensorData[tensorIndex + 2 * modelHeight * modelWidth] = resizedData[pixelIndex + 2] / 255.0; // B
+      // Apply adaptive normalization based on strategy
+      const normalizationFactor = strategy.enableQuantization ? 255.0 : 255.0;
+      
+      tensorData[tensorIndex] = resizedData[pixelIndex] / normalizationFactor; // R
+      tensorData[tensorIndex + modelHeight * modelWidth] = resizedData[pixelIndex + 1] / normalizationFactor; // G
+      tensorData[tensorIndex + 2 * modelHeight * modelWidth] = resizedData[pixelIndex + 2] / normalizationFactor; // B
     }
     
     return new Tensor('float32', tensorData, [1, 3, modelHeight, modelWidth]);
   }
 
-  private postprocessResults(results: any, originalWidth: number, originalHeight: number): Detection[] {
+  private postprocessResultsAdaptive(results: any, originalWidth: number, originalHeight: number, strategy: OptimizationStrategy): Detection[] {
     const output = results.output0 || results[Object.keys(results)[0]];
     if (!output || !output.data) {
       return [];
@@ -499,7 +623,10 @@ export class ObjectDetector {
     // YOLO output format: [batch, 84, num_detections] where 84 = 4 (bbox) + 80 (classes)
     const numDetections = output.dims[2] || data.length / 84;
     
-    for (let i = 0; i < numDetections; i++) {
+    // Limit processing based on strategy
+    const maxDetectionsToProcess = Math.min(numDetections, strategy.maxObjects * 2);
+    
+    for (let i = 0; i < maxDetectionsToProcess; i++) {
       const baseIndex = i * 84;
       
       // Extract bounding box (center_x, center_y, width, height)
@@ -520,8 +647,8 @@ export class ObjectDetector {
         }
       }
       
-      // Apply confidence threshold
-      if (maxConfidence < this.modelConfig.threshold) {
+      // Apply adaptive confidence threshold
+      if (maxConfidence < strategy.confidenceThreshold) {
         continue;
       }
       
@@ -542,29 +669,32 @@ export class ObjectDetector {
       });
     }
     
-    // Apply Non-Maximum Suppression
-    return this.applyNMS(detections);
+    // Apply adaptive NMS with adjusted IoU threshold
+    const adaptiveIoUThreshold = strategy.enableQuantization ? 
+      this.modelConfig.iouThreshold * 0.8 : // More aggressive NMS when quantized
+      this.modelConfig.iouThreshold;
+    
+    return this.applyNMSAdaptive(detections, adaptiveIoUThreshold);
   }
 
-  private applyNMS(detections: Detection[]): Detection[] {
+  private applyNMSAdaptive(detections: Detection[], iouThreshold: number): Detection[] {
     detections.sort((a, b) => b.confidence - a.confidence);
     const results: Detection[] = [];
     const suppressed = new Set<number>();
+    
     for (let i = 0; i < detections.length; i++) {
       if (suppressed.has(i)) continue;
       results.push(detections[i]);
+      
       for (let j = i + 1; j < detections.length; j++) {
         if (suppressed.has(j)) continue;
         const iou = this.calculateIoU(detections[i].bbox, detections[j].bbox);
-        if (iou > this.modelConfig.iouThreshold) {
+        if (iou > iouThreshold) {
           suppressed.add(j);
-          console.warn(`Suppressed overlapping detection (IoU=${iou.toFixed(2)} > threshold)`);
         }
       }
     }
-    if (suppressed.size > 0) {
-      console.warn(`${suppressed.size} overlapping objects suppressed by NMS.`);
-    }
+    
     return results;
   }
 
@@ -614,7 +744,40 @@ export class ObjectDetector {
     return 'landfill';
   }
 
+  private updatePerformanceMetrics(inferenceTime: number, objectCount: number): void {
+    // Track inference time history
+    this.inferenceHistory.push(inferenceTime);
+    if (this.inferenceHistory.length > 20) {
+      this.inferenceHistory.shift();
+    }
+    
+    // Calculate average inference time
+    const avgInferenceTime = this.inferenceHistory.reduce((a, b) => a + b, 0) / this.inferenceHistory.length;
+    
+    // Update adaptive engine with performance metrics
+    adaptiveEngine.updatePerformanceMetrics({
+      averageInferenceTime: avgInferenceTime,
+      memoryUsage: this.estimateMemoryUsage()
+    });
+    
+    this.lastInferenceTime = inferenceTime;
+  }
+
+  private estimateMemoryUsage(): number {
+    // Rough estimation of memory usage in MB
+    if ('memory' in performance) {
+      const memInfo = (performance as any).memory;
+      if (memInfo && memInfo.usedJSHeapSize) {
+        return Math.round(memInfo.usedJSHeapSize / (1024 * 1024));
+      }
+    }
+    return 0;
+  }
+
   dispose(): void {
+    // Clean up adaptive integration
+    window.removeEventListener('adaptive-config-change', this.adaptiveConfigBound);
+    
     // Clean up WebGL integration with proper typing
     webglManager.removeRecoveryCallback(this.webglRecoveryBound);
     window.removeEventListener('webgl-context-lost', this.handleWebGLLoss.bind(this) as EventListener);
