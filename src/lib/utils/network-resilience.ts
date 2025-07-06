@@ -484,4 +484,73 @@ export class NetworkResilienceManager {
 }
 
 // Global instance for easy access
-export const networkManager = new NetworkResilienceManager(); 
+export const networkManager = new NetworkResilienceManager();
+
+// Network Quality Analyzer Extension
+export class NetworkQualityAnalyzer {
+  private samples: { latency: number; bandwidth: number; timestamp: number }[] = [];
+  private readonly SAMPLE_LIMIT = 50;
+
+  async measureNetworkQuality(): Promise<{ latency: number; bandwidth: number; quality: string }> {
+    const start = performance.now();
+    
+    try {
+      // Test with a small payload
+      const response = await fetch('/api/ping', {
+        method: 'POST',
+        body: JSON.stringify({ test: 'a'.repeat(1024) }), // 1KB test
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const end = performance.now();
+      const latency = end - start;
+      
+      // Estimate bandwidth (rough calculation)
+      const bandwidth = (1024 * 8) / (latency / 1000); // bits per second
+      
+      this.samples.push({ latency, bandwidth, timestamp: Date.now() });
+      if (this.samples.length > this.SAMPLE_LIMIT) {
+        this.samples.shift();
+      }
+      
+      const quality = this.classifyQuality(latency, bandwidth);
+      
+      return { latency, bandwidth, quality };
+    } catch (error) {
+      return { latency: Infinity, bandwidth: 0, quality: 'poor' };
+    }
+  }
+
+  private classifyQuality(latency: number, bandwidth: number): string {
+    if (latency < 50 && bandwidth > 1000000) return 'excellent';
+    if (latency < 100 && bandwidth > 500000) return 'good';
+    if (latency < 200 && bandwidth > 100000) return 'fair';
+    return 'poor';
+  }
+
+  getAverageQuality(): { avgLatency: number; avgBandwidth: number; trend: string } {
+    if (this.samples.length === 0) {
+      return { avgLatency: 0, avgBandwidth: 0, trend: 'unknown' };
+    }
+
+    const avgLatency = this.samples.reduce((sum, s) => sum + s.latency, 0) / this.samples.length;
+    const avgBandwidth = this.samples.reduce((sum, s) => sum + s.bandwidth, 0) / this.samples.length;
+    
+    // Calculate trend
+    const recent = this.samples.slice(-10);
+    const older = this.samples.slice(-20, -10);
+    
+    let trend = 'stable';
+    if (recent.length > 0 && older.length > 0) {
+      const recentAvg = recent.reduce((sum, s) => sum + s.latency, 0) / recent.length;
+      const olderAvg = older.reduce((sum, s) => sum + s.latency, 0) / older.length;
+      
+      if (recentAvg < olderAvg * 0.9) trend = 'improving';
+      else if (recentAvg > olderAvg * 1.1) trend = 'degrading';
+    }
+
+    return { avgLatency, avgBandwidth, trend };
+  }
+}
+
+export const networkQualityAnalyzer = new NetworkQualityAnalyzer(); 
