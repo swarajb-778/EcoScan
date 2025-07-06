@@ -609,4 +609,85 @@ export class PerformanceProfiler {
 }
 
 // Global instance for easy access
-export const performanceProfiler = new PerformanceProfiler(); 
+export const performanceProfiler = new PerformanceProfiler();
+
+// Advanced Performance Optimizer Extension
+export class PerformanceOptimizer {
+  private bottlenecks: Map<string, { count: number; totalTime: number; avgTime: number }> = new Map();
+  private optimizations: Map<string, boolean> = new Map();
+
+  detectBottleneck(operation: string, duration: number): void {
+    const existing = this.bottlenecks.get(operation) || { count: 0, totalTime: 0, avgTime: 0 };
+    existing.count++;
+    existing.totalTime += duration;
+    existing.avgTime = existing.totalTime / existing.count;
+    
+    this.bottlenecks.set(operation, existing);
+    
+    // Trigger optimization if bottleneck is significant
+    if (existing.avgTime > 50 && existing.count > 5) {
+      this.suggestOptimization(operation, existing);
+    }
+  }
+
+  private suggestOptimization(operation: string, stats: { count: number; totalTime: number; avgTime: number }): void {
+    if (this.optimizations.has(operation)) return;
+    
+    this.optimizations.set(operation, true);
+    
+    const suggestion = this.getOptimizationSuggestion(operation, stats);
+    console.warn(`🚀 Optimization suggested for ${operation}:`, suggestion);
+    
+    window.dispatchEvent(new CustomEvent('performance-optimization', {
+      detail: { operation, stats, suggestion }
+    }));
+  }
+
+  private getOptimizationSuggestion(operation: string, stats: any): string {
+    if (operation.includes('render')) {
+      return 'Consider using requestAnimationFrame or virtual scrolling';
+    } else if (operation.includes('network')) {
+      return 'Implement request batching or caching strategies';
+    } else if (operation.includes('calculation')) {
+      return 'Move heavy calculations to web workers';
+    } else if (operation.includes('dom')) {
+      return 'Batch DOM updates or use document fragments';
+    }
+    return 'Profile and optimize this operation';
+  }
+
+  getBottleneckReport(): Array<{ operation: string; avgTime: number; count: number; severity: string }> {
+    return Array.from(this.bottlenecks.entries()).map(([operation, stats]) => ({
+      operation,
+      avgTime: stats.avgTime,
+      count: stats.count,
+      severity: stats.avgTime > 100 ? 'critical' : stats.avgTime > 50 ? 'high' : 'medium'
+    })).sort((a, b) => b.avgTime - a.avgTime);
+  }
+
+  async optimizeForDevice(): Promise<void> {
+    // Device-specific optimizations
+    const deviceMemory = (navigator as any).deviceMemory || 4;
+    const hardwareConcurrency = navigator.hardwareConcurrency || 4;
+    
+    if (deviceMemory < 4) {
+      // Low memory device optimizations
+      window.dispatchEvent(new CustomEvent('enable-low-memory-mode'));
+      console.log('🔧 Enabled low memory optimizations');
+    }
+    
+    if (hardwareConcurrency < 4) {
+      // Low CPU device optimizations
+      window.dispatchEvent(new CustomEvent('enable-low-cpu-mode'));
+      console.log('🔧 Enabled low CPU optimizations');
+    }
+  }
+
+  clearOptimizations(): void {
+    this.bottlenecks.clear();
+    this.optimizations.clear();
+    console.log('🧹 Performance optimizations cleared');
+  }
+}
+
+export const performanceOptimizer = new PerformanceOptimizer(); 
