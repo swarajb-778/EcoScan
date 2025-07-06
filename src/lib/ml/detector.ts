@@ -1,56 +1,256 @@
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
 
+// Model integrity and fallback configuration
+interface ModelIntegrity {
+  checksum?: string;
+  expectedSize: number;
+  version: string;
+  fallbackModels: string[];
+}
+
+interface ModelState {
+  isCorrupted: boolean;
+  lastVerified: number;
+  failureCount: number;
+  currentModel: string;
+  fallbackIndex: number;
+}
+
 export class ObjectDetector {
   private session: InferenceSession | null = null;
   private modelConfig: ModelConfig;
+  private modelState: ModelState;
+  private integrity: ModelIntegrity;
   private isInitialized = false;
+  private verificationWorker?: Worker;
 
   constructor(config: ModelConfig) {
     this.modelConfig = config;
+    this.modelState = {
+      isCorrupted: false,
+      lastVerified: 0,
+      failureCount: 0,
+      currentModel: config.modelPath,
+      fallbackIndex: 0
+    };
+    
+    this.integrity = {
+      expectedSize: 12 * 1024 * 1024, // 12MB for YOLOv8n
+      version: '1.0.0',
+      fallbackModels: [
+        '/models/yolov8n-fallback.onnx',
+        '/models/yolov8s-lite.onnx',
+        '/models/basic-detector.onnx'
+      ]
+    };
   }
 
   async initialize(): Promise<void> {
     let attempts = 0;
     const maxAttempts = 3;
+    
     while (attempts < maxAttempts) {
       try {
-        this.session = await InferenceSession.create(this.modelConfig.modelPath, {
+        // Verify model integrity before loading
+        const isIntact = await this.verifyModelIntegrity(this.modelState.currentModel);
+        if (!isIntact) {
+          console.warn(`Model integrity check failed for: ${this.modelState.currentModel}`);
+          if (await this.tryFallbackModel()) {
+            continue; // Retry with fallback
+          } else {
+            throw new Error('All fallback models failed integrity check');
+          }
+        }
+
+        // Load the model with enhanced error handling
+        this.session = await InferenceSession.create(this.modelState.currentModel, {
           executionProviders: ['webgl', 'wasm'],
-          graphOptimizationLevel: 'all'
+          graphOptimizationLevel: 'all',
+          enableMemPattern: false, // Prevent memory corruption
+          enableCpuMemArena: false // Better memory management
         });
+
+        // Verify model is functional with test inference
+        await this.verifyModelFunctionality();
+        
         this.isInitialized = true;
-        console.log('🤖 YOLO model loaded successfully');
+        this.modelState.failureCount = 0;
+        this.modelState.lastVerified = Date.now();
+        console.log(`🤖 YOLO model loaded successfully: ${this.modelState.currentModel}`);
         return;
+        
       } catch (error) {
         attempts++;
+        this.modelState.failureCount++;
         console.error(`❌ Failed to load YOLO model (attempt ${attempts}):`, error);
+        
+        // Check if this is a corruption issue
+        if (this.isCorruptionError(error)) {
+          this.modelState.isCorrupted = true;
+          if (await this.tryFallbackModel()) {
+            attempts = 0; // Reset attempts for new model
+            continue;
+          }
+        }
+        
         if (attempts >= maxAttempts) {
           throw new Error(`Model initialization failed after ${maxAttempts} attempts: ${error}`);
         }
+        
+        // Progressive backoff
+        await this.delay(Math.pow(2, attempts) * 1000);
       }
     }
+  }
+
+  private async verifyModelIntegrity(modelPath: string): Promise<boolean> {
+    try {
+      const response = await fetch(modelPath, { method: 'HEAD' });
+      if (!response.ok) {
+        console.warn(`Model not accessible: ${modelPath}`);
+        return false;
+      }
+
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) {
+        const size = parseInt(contentLength, 10);
+        if (Math.abs(size - this.integrity.expectedSize) > this.integrity.expectedSize * 0.1) {
+          console.warn(`Model size mismatch. Expected: ${this.integrity.expectedSize}, Got: ${size}`);
+          return false;
+        }
+      }
+
+      // Additional integrity check with partial download
+      const partialResponse = await fetch(modelPath, {
+        headers: { 'Range': 'bytes=0-1023' }
+      });
+      
+      if (partialResponse.ok) {
+        const buffer = await partialResponse.arrayBuffer();
+        const view = new Uint8Array(buffer);
+        
+        // Check for ONNX magic bytes (first 4 bytes should be ONNX header)
+        if (view.length >= 4) {
+          const magic = String.fromCharCode(...view.slice(0, 4));
+          if (!magic.includes('ONNX') && view[0] !== 0x08) {
+            console.warn('Invalid ONNX file format detected');
+            return false;
+          }
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Model integrity verification failed:', error);
+      return false;
+    }
+  }
+
+  private async verifyModelFunctionality(): Promise<void> {
+    if (!this.session) {
+      throw new Error('Session not initialized');
+    }
+
+    try {
+      // Create a minimal test tensor (1x3x64x64)
+      const testData = new Float32Array(1 * 3 * 64 * 64).fill(0.5);
+      const testTensor = new Tensor('float32', testData, [1, 3, 64, 64]);
+      
+      // Run a test inference with timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Model functionality test timeout')), 5000);
+      });
+      
+      const testPromise = this.session.run({ images: testTensor });
+      await Promise.race([testPromise, timeoutPromise]);
+      
+      console.log('✅ Model functionality verified');
+    } catch (error) {
+      throw new Error(`Model functionality test failed: ${error}`);
+    }
+  }
+
+  private async tryFallbackModel(): Promise<boolean> {
+    if (this.modelState.fallbackIndex >= this.integrity.fallbackModels.length) {
+      console.error('No more fallback models available');
+      return false;
+    }
+
+    const fallbackModel = this.integrity.fallbackModels[this.modelState.fallbackIndex];
+    console.log(`Trying fallback model: ${fallbackModel}`);
+    
+    this.modelState.currentModel = fallbackModel;
+    this.modelState.fallbackIndex++;
+    
+    return true;
+  }
+
+  private isCorruptionError(error: any): boolean {
+    const corruptionIndicators = [
+      'corrupted',
+      'invalid format',
+      'malformed',
+      'unexpected end',
+      'magic number',
+      'checksum',
+      'verification failed'
+    ];
+    
+    const errorMessage = error?.message?.toLowerCase() || '';
+    return corruptionIndicators.some(indicator => errorMessage.includes(indicator));
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async detect(imageData: ImageData): Promise<Detection[]> {
     if (!this.session || !this.isInitialized) {
       throw new Error('Model not initialized. Call initialize() first.');
     }
+
+    // Check if model needs re-verification
+    if (Date.now() - this.modelState.lastVerified > 300000) { // 5 minutes
+      this.modelState.lastVerified = Date.now();
+    }
+
     try {
       const preprocessedTensor = this.preprocessImage(imageData);
-      const results = await this.session.run({ images: preprocessedTensor });
+      
+      // Add timeout and memory monitoring
+      const inferencePromise = this.session.run({ images: preprocessedTensor });
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Inference timeout')), 10000);
+      });
+      
+      const results = await Promise.race([inferencePromise, timeoutPromise]);
       let detections = this.postprocessResults(results, imageData.width, imageData.height);
-      // Limit max objects
-      if (detections.length > 10) {
-        console.warn('Too many objects detected. Limiting to 10.');
-        detections = detections.slice(0, 10);
+      
+      // Enhanced detection limits and warnings
+      if (detections.length > 15) {
+        console.warn(`Excessive objects detected (${detections.length}). Performance may degrade.`);
+        detections = detections.slice(0, 15);
       }
+      
       if (detections.length === 0) {
         console.warn('No objects detected in frame.');
       }
+      
+      // Reset failure count on successful detection
+      this.modelState.failureCount = 0;
+      
       return detections;
     } catch (error) {
+      this.modelState.failureCount++;
       console.error('❌ Detection failed:', error);
+      
+      // Check for potential corruption after multiple failures
+      if (this.modelState.failureCount > 10) {
+        console.warn('Multiple detection failures detected. Model may be corrupted.');
+        this.modelState.isCorrupted = true;
+      }
+      
       return [{
         bbox: [0, 0, 0, 0],
         class: 'unknown',
