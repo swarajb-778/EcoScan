@@ -2,6 +2,8 @@ import { InferenceSession, Tensor } from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
 import { webglManager } from '../utils/webgl-manager.js';
 import { adaptiveEngine, type OptimizationStrategy } from './adaptive-engine.js';
+import { abTestingFramework } from '$lib/utils/ab-testing.js';
+import { modelExperiment } from '$lib/experiments';
 
 // Model integrity and fallback configuration
 interface ModelIntegrity {
@@ -16,6 +18,7 @@ interface ModelState {
   lastVerified: number;
   failureCount: number;
   currentModel: string;
+  currentModelName: string;
   fallbackIndex: number;
 }
 
@@ -34,11 +37,17 @@ export class ObjectDetector {
 
   constructor(config: ModelConfig) {
     this.modelConfig = config;
+
+    // A/B Testing Integration
+    abTestingFramework.registerExperiment(modelExperiment);
+    const modelVariantConfig = abTestingFramework.getVariantConfig(modelExperiment.id);
+
     this.modelState = {
       isCorrupted: false,
       lastVerified: 0,
       failureCount: 0,
-      currentModel: config.modelPath,
+      currentModel: modelVariantConfig.modelPath || config.modelPath,
+      currentModelName: modelVariantConfig.modelName || 'YOLOv8n (Default)',
       fallbackIndex: 0
     };
     
@@ -109,7 +118,7 @@ export class ObjectDetector {
   }
 
   private handleWebGLLoss(): void {
-    console.warn('�� WebGL context lost - ML inference paused');
+    console.warn('💥 WebGL context lost - ML inference paused');
     this.isInitialized = false;
     
     // Don't dispose session immediately - it might recover
@@ -246,13 +255,13 @@ export class ObjectDetector {
         this.isInitialized = true;
         this.modelState.failureCount = 0;
         this.modelState.lastVerified = Date.now();
-        console.log(`🤖 YOLO model loaded successfully: ${this.modelState.currentModel}`);
+        console.log(`🤖 YOLO model loaded successfully: ${this.modelState.currentModelName} (${this.modelState.currentModel})`);
         return;
         
-      } catch (error) {
+      } catch (error: any) {
         attempts++;
         this.modelState.failureCount++;
-        console.error(`❌ Failed to load YOLO model (attempt ${attempts}):`, error);
+        console.error(`Attempt ${attempts + 1} failed for ${this.modelState.currentModel}:`, error);
         
         // Check if this is a WebGL-related error
         if (this.isWebGLError(error)) {
