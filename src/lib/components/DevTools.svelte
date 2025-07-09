@@ -2,7 +2,7 @@
 	import { ConcurrentUserSimulator } from '$lib/utils/concurrent-simulation';
 	import type { ModelConfig } from '$lib/types';
 	import { onMount } from 'svelte';
-	import { TestingFramework, type TestSuite, type TestRun } from '$lib/utils/testing-framework';
+	import { testingFramework, type TestSuite, type TestRun } from '$lib/utils/testing-framework';
 	import { isBrowser } from '$lib/utils/browser';
 
 	let activeTab: 'simulation' | 'testing' = 'simulation';

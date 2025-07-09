@@ -1268,5 +1268,20 @@ class TestingFramework {
   }
 }
 
+export function getMockImageData(width: number = 640, height: number = 480): ImageData {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  
+  // Create a simple pattern for testing
+  ctx.fillStyle = '#22c55e';
+  ctx.fillRect(0, 0, width / 2, height / 2);
+  ctx.fillStyle = '#ef4444';
+  ctx.fillRect(width / 2, height / 2, width / 2, height / 2);
+  
+  return ctx.getImageData(0, 0, width, height);
+}
+
 export const testingFramework = new TestingFramework();
 export default TestingFramework; 
