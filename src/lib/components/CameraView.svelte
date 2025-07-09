@@ -10,7 +10,11 @@
     setCameraStream,
     stopCamera,
     permissionsGranted,
-    updatePerformanceMetric
+    updatePerformanceMetric,
+    isLoading,
+    error,
+    isCameraActive,
+    loadingState
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { getQRScanSupportMessage } from '$lib/utils/qr.js';
