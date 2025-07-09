@@ -1,36 +1,55 @@
 <!doctype html>
-<html lang="en" class="%sveltekit.theme%">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-		<meta name="description" content="EcoScan - AI-powered waste classification for better recycling" />
-		
-		<!-- PWA Meta Tags -->
-		<meta name="application-name" content="EcoScan" />
-		<meta name="apple-mobile-web-app-capable" content="yes" />
-		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-		<meta name="apple-mobile-web-app-title" content="EcoScan" />
-		<meta name="format-detection" content="telephone=no" />
-		<meta name="mobile-web-app-capable" content="yes" />
-		<meta name="theme-color" content="#22c55e" />
-		
-		<!-- Open Graph / Social Media -->
-		<meta property="og:type" content="website" />
-		<meta property="og:title" content="EcoScan - AI Waste Classification" />
-		<meta property="og:description" content="Real-time object detection and waste classification in your browser" />
-		<meta property="og:site_name" content="EcoScan" />
-		<meta property="og:url" content="https://ecoscan.vercel.app" />
-		
-		<!-- Security headers -->
-		<meta http-equiv="X-Content-Type-Options" content="nosniff" />
-		<meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin" />
-		
-		<title>EcoScan - AI Waste Classification</title>
-		
-		%sveltekit.head%
-	</head>
-	<body data-sveltekit-preload-data="hover" class="bg-gray-50 min-h-screen">
-		<div style="display: contents">%sveltekit.body%</div>
-	</body>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<meta name="theme-color" content="#22c55e" />
+	<meta name="description" content="EcoScan - AI-powered waste classification for sustainable living. Identify and sort waste items using advanced computer vision technology." />
+	<meta name="keywords" content="waste classification, recycling, sustainability, AI, computer vision, environmental" />
+	<meta name="author" content="EcoScan Team" />
+	
+	<!-- Open Graph / Social Media -->
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content="EcoScan - AI Waste Classification" />
+	<meta property="og:description" content="Classify waste items instantly with AI-powered computer vision technology" />
+	<meta property="og:image" content="/icon-512x512.png" />
+	<meta property="og:url" content="https://ecoscan.app" />
+	
+	<!-- Twitter Card -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="EcoScan - AI Waste Classification" />
+	<meta name="twitter:description" content="Classify waste items instantly with AI-powered computer vision technology" />
+	<meta name="twitter:image" content="/icon-512x512.png" />
+	
+	<!-- Performance optimizations -->
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+	
+	<!-- PWA Manifest and Icons -->
+	<link rel="manifest" href="/manifest.json" />
+	<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+	<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+	<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+	<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#22c55e" />
+	
+	<!-- Security -->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' https:; frame-src 'none';" />
+	
+	<title>%sveltekit.title%</title>
+	%sveltekit.head%
+</head>
+<body data-sveltekit-preload-data="hover" class="bg-gray-50">
+	<div id="app" style="display: contents">%sveltekit.body%</div>
+	
+	<!-- Loading screen for better perceived performance -->
+	<noscript>
+		<div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f9fafb; display: flex; align-items: center; justify-content: center; font-family: system-ui;">
+			<div style="text-align: center;">
+				<h1 style="color: #22c55e; margin: 0 0 1rem 0;">EcoScan</h1>
+				<p>JavaScript is required to run this application.</p>
+			</div>
+		</div>
+	</noscript>
+</body>
 </html>
