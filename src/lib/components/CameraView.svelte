@@ -15,12 +15,15 @@
     isLoading,
     error,
     isCameraActive,
-    loadingState
+    loadingState,
+    offlineStatus,
+    isOfflineMode
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
   import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
   import FallbackDetection from './FallbackDetection.svelte';
+  import { getOfflineManager, offline, offlineStatus, isOfflineMode } from '$lib/utils/offline-manager.js';
 
   // Component state
   let videoElement: HTMLVideoElement;
@@ -686,7 +689,7 @@
           
           // Perform detection with timing
           perf.start('frameDetection');
-          performDetection();
+          performDetectionWithOfflineSupport();
           
           // Update performance metrics every 30 frames
           if (frameCount % 30 === 0) {
@@ -714,12 +717,15 @@
     animationId = requestAnimationFrame(detectFrame);
   }
 
-  // Perform object detection with comprehensive performance tracking
-  async function performDetection() {
-    if (!detector || !videoElement || !canvasElement || !overlayCanvasElement) return;
+  // Enhanced perform detection with offline support
+  async function performDetectionWithOfflineSupport() {
+    if (!detector && !videoElement && !canvasElement && !overlayCanvasElement) return;
     
     try {
-      // Draw current video frame to canvas with timing
+      // Check if we're offline
+      const isOffline = !navigator.onLine;
+      
+      // Get image data
       perf.start('canvasDrawing');
       const ctx = canvasElement.getContext('2d');
       if (!ctx) return;
@@ -729,50 +735,72 @@
       
       // Get image data for detection
       perf.start('imageDataExtraction');
-      const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+      const imageDataUrl = canvasElement.toDataURL('image/jpeg', 0.8);
       perf.end('imageDataExtraction', 'ui');
       
-      // Run detection with comprehensive timing
-      perf.start('objectDetection');
-      const detectedObjects = await detector.detect(imageData);
-      const detectionTime = perf.end('objectDetection', 'ml');
+      let detectedObjects: Detection[] = [];
       
-      // Record inference time using performance monitor
-      perf.inference(detectionTime);
+      if (isOffline) {
+        // Use offline detection
+        console.log('📴 Performing offline detection...');
+        perf.start('offlineDetection');
+        detectedObjects = await offline.detect(imageDataUrl);
+        const offlineTime = perf.end('offlineDetection', 'ml');
+        
+        // Store detection offline for later sync
+        await offline.store(imageDataUrl, detectedObjects);
+        
+        console.log(`🤖 Offline detection completed in ${offlineTime.toFixed(1)}ms`);
+        
+      } else {
+        // Use online detection
+        perf.start('onlineDetection');
+        detectedObjects = await detector.detect(ctx.getImageData(0, 0, canvasElement.width, canvasElement.height));
+        const detectionTime = perf.end('onlineDetection', 'ml');
+        
+        // Record inference time
+        perf.inference(detectionTime);
+        
+        console.log(`🌐 Online detection completed in ${detectionTime.toFixed(1)}ms`);
+      }
       
       // Update detections store
       detections.set(detectedObjects);
       
-      // Draw detection results with timing
+      // Draw detection results
       perf.start('resultRendering');
       drawDetections(detectedObjects);
       const renderTime = perf.end('resultRendering', 'ui');
       
-      // Log detailed performance every 100 frames for debugging
+      // Record detection results
+      perf.record('detectedObjectCount', detectedObjects.length, 'count', 'ml');
+      perf.record('detectionMode', isOffline ? 0 : 1, 'binary', 'ml');
+      
+      // Log performance every 100 frames
       if (frameCount % 100 === 0) {
-        console.log('📊 Detection performance breakdown:', {
-          total: `${(detectionTime + drawTime + renderTime).toFixed(1)}ms`,
-          inference: `${detectionTime.toFixed(1)}ms`,
-          canvasDrawing: `${drawTime.toFixed(1)}ms`,
-          resultRendering: `${renderTime.toFixed(1)}ms`,
-          detectedObjects: detectedObjects.length,
+        console.log('📊 Detection performance:', {
+          mode: isOffline ? 'offline' : 'online',
+          objects: detectedObjects.length,
           frameCount: frameCount
         });
       }
-      
-      // Record detection results
-      perf.record('detectedObjectCount', detectedObjects.length, 'count', 'ml');
-      perf.record('totalDetectionTime', detectionTime + drawTime + renderTime, 'ms', 'ml');
-      
-      // Update legacy performance metric for compatibility
-      updatePerformanceMetric('averageInferenceTime', detectionTime);
       
     } catch (error) {
       console.error('❌ Detection error:', error);
       perf.record('detectionError', 1, 'count', 'ml');
       
-      // End any pending timers
-      perf.end('frameDetection', 'ml');
+      // Try offline fallback if online detection fails
+      if (navigator.onLine) {
+        console.log('🔄 Falling back to offline detection...');
+        try {
+          const imageDataUrl = canvasElement.toDataURL('image/jpeg', 0.8);
+          const fallbackDetections = await offline.detect(imageDataUrl);
+          detections.set(fallbackDetections);
+          drawDetections(fallbackDetections);
+        } catch (fallbackError) {
+          console.error('❌ Offline fallback also failed:', fallbackError);
+        }
+      }
     }
   }
 
@@ -1177,6 +1205,33 @@
         🎯 Point your camera at waste items to classify them.<br>
         📱 Tap on detected objects for disposal instructions.
       </p>
+    </div>
+  {/if}
+
+  <!-- Offline Status Indicator -->
+  {#if $isOfflineMode}
+    <div class="absolute top-4 right-4 bg-orange-500 text-white px-3 py-2 rounded-lg flex items-center space-x-2">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192L5.636 18.364M12 2v2.25M12 19.75V22M2 12h2.25M19.75 12H22"></path>
+      </svg>
+      <span class="text-sm font-medium">Offline Mode</span>
+    </div>
+  {:else}
+    <div class="absolute top-4 right-4 bg-green-500 text-white px-3 py-2 rounded-lg flex items-center space-x-2">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+      </svg>
+      <span class="text-sm font-medium">Online</span>
+    </div>
+  {/if}
+
+  <!-- Sync Status Indicator -->
+  {#if $offlineStatus.pendingSync > 0}
+    <div class="absolute top-16 right-4 bg-blue-500 text-white px-3 py-2 rounded-lg flex items-center space-x-2">
+      <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+      </svg>
+      <span class="text-sm font-medium">{$offlineStatus.pendingSync} pending sync</span>
     </div>
   {/if}
 </div>
