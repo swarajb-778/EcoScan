@@ -18,7 +18,7 @@
     loadingState
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
-  import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument } from '$lib/utils/browser.js';
+  import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
 
   // Component state
   let videoElement: HTMLVideoElement;
@@ -240,54 +240,110 @@
     }
   }
 
-  // Progressive camera constraints with fallbacks
+  // Progressive camera constraints with intelligent device adaptation
   async function getUserMediaWithFallback(): Promise<MediaStream> {
-    const constraints = [
-      // High quality - prefer rear camera
-      {
-        video: {
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 30, max: 60 },
-          facingMode: 'environment'
-        }
-      },
-      // Medium quality - any camera
+    console.log('📱 Analyzing device capabilities for optimal camera setup...');
+    
+    // Get device-specific optimal constraints
+    const optimalConstraints = getOptimalCameraConstraints();
+    const devicePreferences = getCameraDevicePreferences();
+    const compatibility = checkCameraCompatibility();
+    
+    console.log('📊 Device compatibility analysis:', {
+      score: compatibility.score,
+      issues: compatibility.issues,
+      warnings: compatibility.warnings
+    });
+    
+    // Show compatibility warnings to user if needed
+    if (compatibility.warnings.length > 0) {
+      console.warn('⚠️ Device compatibility warnings:', compatibility.warnings);
+    }
+    
+    // Build constraint sets based on device capabilities and preferences
+    const constraintSets = [
+      // 1. Optimal constraints for this device
+      optimalConstraints,
+      
+      // 2. Device preference fallbacks
+      ...devicePreferences.fallbackConstraints,
+      
+      // 3. Progressive quality reduction
       {
         video: {
           width: { ideal: 960, max: 1280 },
           height: { ideal: 540, max: 720 },
           frameRate: { ideal: 24, max: 30 },
-          facingMode: { ideal: 'environment' }
+          facingMode: { ideal: devicePreferences.preferredFacingMode }
         }
       },
-      // Basic quality
       {
         video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          frameRate: { ideal: 15 }
+          width: { ideal: 640, max: 800 },
+          height: { ideal: 480, max: 600 },
+          frameRate: { ideal: 15, max: 24 }
         }
       },
-      // Minimal constraints
+      {
+        video: {
+          width: { ideal: 480 },
+          height: { ideal: 360 }
+        }
+      },
+      // 4. Minimal fallback
       { video: true }
     ];
     
-    for (let i = 0; i < constraints.length; i++) {
+    console.log(`📹 Trying ${constraintSets.length} progressive constraint sets...`);
+    
+    let lastError: Error | null = null;
+    
+    for (let i = 0; i < constraintSets.length; i++) {
       try {
-        console.log(`📷 Trying camera constraints set ${i + 1}/${constraints.length}`);
-        const stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
-        console.log(`✅ Camera constraints set ${i + 1} successful`);
-        return stream;
-      } catch (error) {
-        console.warn(`⚠️ Camera constraints set ${i + 1} failed:`, error);
-        if (i === constraints.length - 1) {
-          throw error; // Re-throw if all constraints failed
+        const constraints = constraintSets[i];
+        console.log(`📷 Attempting constraint set ${i + 1}/${constraintSets.length}:`, constraints);
+        
+        const startTime = performance.now();
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const initTime = performance.now() - startTime;
+        
+        // Validate stream quality
+        if (stream && stream.getVideoTracks().length > 0) {
+          const track = stream.getVideoTracks()[0];
+          const settings = track.getSettings();
+          
+          console.log(`✅ Camera initialized successfully with constraint set ${i + 1}:`, {
+            resolution: `${settings.width}x${settings.height}`,
+            frameRate: settings.frameRate,
+            facingMode: settings.facingMode,
+            initTime: `${initTime.toFixed(0)}ms`
+          });
+          
+          // Update performance metrics
+          updatePerformanceMetric('cameraInitTime', initTime);
+          updatePerformanceMetric('cameraResolution', `${settings.width}x${settings.height}`);
+          
+          return stream;
+        }
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`⚠️ Constraint set ${i + 1} failed:`, {
+          name: error.name,
+          message: error.message,
+          constraint: error.constraint
+        });
+        
+        // Don't continue if it's a permission error
+        if (error.name === 'NotAllowedError') {
+          console.error('❌ Camera permission denied - stopping fallback attempts');
+          throw error;
         }
       }
     }
     
-    throw new Error('All camera constraint sets failed');
+    // If all constraints failed, throw the last error
+    console.error('❌ All camera constraint sets failed');
+    throw lastError || new Error('All camera constraint sets failed');
   }
 
   // Set up video element with comprehensive error handling
@@ -350,46 +406,123 @@
     });
   }
 
-  // Enhanced error handling with specific error types
+  // Enhanced error handling with device-specific recommendations
   function handleCameraError(error: any): string {
     const errorName = error.name || '';
     const errorMessage = error.message || error.toString();
+    const compatibility = checkCameraCompatibility();
+    const browserInfo = getBrowserInfo();
+    const deviceInfo = getDeviceInfo();
+    const isMobile = isDeviceMobile();
     
-    console.error('🔍 Camera error details:', {
+    console.error('🔍 Detailed camera error analysis:', {
       name: errorName,
       message: errorMessage,
       constraint: error.constraint,
-      stack: error.stack
+      stack: error.stack,
+      compatibility: compatibility.score,
+      browser: `${browserInfo.name} ${browserInfo.version}`,
+      platform: browserInfo.platform,
+      mobile: isMobile,
+      memory: deviceInfo.memory,
+      cores: deviceInfo.cores
     });
+    
+    let userMessage = '';
+    let recommendations: string[] = [];
     
     switch (errorName) {
       case 'NotAllowedError':
-        return 'Camera permission denied. Please allow camera access in your browser settings and refresh the page.';
+        userMessage = 'Camera permission denied.';
+        recommendations.push('Click the camera icon in your browser\'s address bar to allow access');
+        recommendations.push('Check your browser settings under Privacy & Security > Camera');
+        if (isMobile) {
+          recommendations.push('Check your device\'s camera permissions for this browser');
+        }
+        break;
       
       case 'NotFoundError':
-        return 'No camera found. Please check if your device has a camera and it\'s properly connected.';
+        userMessage = 'No camera device found.';
+        if (isMobile) {
+          recommendations.push('Ensure your device has a working camera');
+        } else {
+          recommendations.push('Connect a webcam to your computer');
+          recommendations.push('Check if your camera is recognized in system settings');
+        }
+        break;
       
       case 'NotReadableError':
-        return 'Camera is currently in use by another application. Please close other camera apps and try again.';
+        userMessage = 'Camera is currently in use.';
+        recommendations.push('Close other applications using the camera');
+        recommendations.push('Close other browser tabs that might be using the camera');
+        if (isMobile) {
+          recommendations.push('Close other camera apps running in the background');
+        }
+        break;
       
       case 'OverconstrainedError':
-        return `Camera doesn't support the required settings. Constraint: ${error.constraint || 'unknown'}`;
+        userMessage = `Camera doesn't support the required quality settings.`;
+        recommendations.push('Your camera may be limited in resolution or frame rate');
+        if (error.constraint) {
+          recommendations.push(`Constraint failed: ${error.constraint}`);
+        }
+        break;
       
       case 'SecurityError':
-        return 'Camera access blocked due to security restrictions. Please ensure you\'re using HTTPS or localhost.';
+        userMessage = 'Camera access blocked due to security restrictions.';
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+          recommendations.push('Camera access requires HTTPS. Use https:// in the URL');
+        }
+        recommendations.push('Check if camera access is blocked by browser extensions');
+        break;
       
       case 'AbortError':
-        return 'Camera initialization was aborted. This may be due to browser security policies.';
+        userMessage = 'Camera initialization was interrupted.';
+        recommendations.push('Try refreshing the page');
+        recommendations.push('This may be due to browser security policies');
+        break;
       
       default:
         if (errorMessage.includes('timeout')) {
-          return 'Camera initialization timed out. Please refresh the page and try again.';
+          userMessage = 'Camera initialization timed out.';
+          recommendations.push('Your device may be slow to initialize the camera');
+          recommendations.push('Try refreshing the page and waiting longer');
+        } else if (errorMessage.includes('not supported')) {
+          userMessage = 'Your browser doesn\'t support camera access.';
+          recommendations.push('Update to a modern browser (Chrome, Firefox, Safari, Edge)');
+        } else {
+          userMessage = `Camera error: ${errorMessage}`;
         }
-        if (errorMessage.includes('not supported')) {
-          return 'Your browser or device doesn\'t support camera access. Please use Chrome, Firefox, Safari, or Edge.';
-        }
-        return `Camera error: ${errorMessage}`;
     }
+    
+    // Add compatibility-based recommendations
+    if (compatibility.score < 70) {
+      recommendations.push(...compatibility.recommendations);
+    }
+    
+    // Browser-specific recommendations
+    if (browserInfo.name === 'safari' && browserInfo.version < 14) {
+      recommendations.push('Update Safari to version 14 or later for better camera support');
+    } else if (browserInfo.name === 'firefox' && browserInfo.version < 70) {
+      recommendations.push('Update Firefox to version 70 or later for better performance');
+    } else if (browserInfo.name === 'chrome' && browserInfo.version < 80) {
+      recommendations.push('Update Chrome to the latest version for best experience');
+    }
+    
+    // Device-specific recommendations
+    if (deviceInfo.memory && deviceInfo.memory < 2) {
+      recommendations.push('Close other tabs to free up memory');
+      recommendations.push('Consider using image upload instead of real-time detection');
+    }
+    
+    // Store recommendations for UI display
+    localError = userMessage;
+    if (recommendations.length > 0) {
+      console.log('💡 Recommendations for user:', recommendations);
+      // You could store these in a separate reactive variable for the UI
+    }
+    
+    return userMessage;
   }
 
   // Determine if camera error should trigger retry
