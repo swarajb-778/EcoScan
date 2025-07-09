@@ -20,6 +20,7 @@
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
   import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
+  import FallbackDetection from './FallbackDetection.svelte';
 
   // Component state
   let videoElement: HTMLVideoElement;
@@ -963,6 +964,60 @@
     
     console.log('✅ CameraView cleanup complete');
   }
+
+  // Handle fallback detection results
+  function handleFallbackDetection(event: CustomEvent<{detections: Detection[], method: string}>) {
+    const { detections, method } = event.detail;
+    
+    console.log(`✅ Fallback detection successful using ${method}:`, detections);
+    
+    // Update detections store with fallback results
+    detections.set(detections);
+    
+    // Record fallback usage for analytics
+    perf.record('fallbackDetectionUsed', 1, 'count', 'ml');
+    perf.record('fallbackMethod', this.mapMethodToScore(method), 'score', 'ml');
+    
+    // Show success message
+    setSuccess(`Successfully classified using ${method} input`);
+    
+    // Clear any existing errors
+    localError = null;
+    setError(null);
+  }
+
+  function handleFallbackError(event: CustomEvent<{message: string, method: string}>) {
+    const { message, method } = event.detail;
+    
+    console.error(`❌ Fallback detection failed using ${method}:`, message);
+    
+    // Record fallback error for analytics
+    perf.record('fallbackDetectionFailed', 1, 'count', 'ml');
+    
+    // Show error message to user
+    setError(`${method} detection failed: ${message}`);
+  }
+
+  function handleFallbackLoading(event: CustomEvent<{isLoading: boolean, method: string}>) {
+    const { isLoading, method } = event.detail;
+    
+    if (isLoading) {
+      setLoadingState(true, 'fallback', 0, `Processing ${method} input...`);
+    } else {
+      setLoadingState(false);
+    }
+  }
+
+  // Map fallback method to numeric score for analytics
+  function mapMethodToScore(method: string): number {
+    const scores = {
+      'image': 4,
+      'voice': 3,
+      'text': 2,
+      'clipboard': 4
+    };
+    return scores[method as keyof typeof scores] || 1;
+  }
 </script>
 
 <svelte:window on:resize={handleResize} />
@@ -1073,17 +1128,17 @@
                     {/if}
                   </button>
                   
-                  <!-- Alternative options -->
+                  <!-- Comprehensive Fallback Detection -->
                   <div class="border-t border-red-400 pt-3">
-                    <p class="text-xs text-red-300 mb-2">Alternative options:</p>
-                    <div class="grid grid-cols-2 gap-2">
-                      <a href="/upload" class="btn btn-xs btn-outline btn-error text-red-300 border-red-400 hover:bg-red-500 hover:text-white">
-                        📤 Upload Image
-                      </a>
-                      <a href="/voice" class="btn btn-xs btn-outline btn-error text-red-300 border-red-400 hover:bg-red-500 hover:text-white">
-                        🎤 Voice Input
-                      </a>
-                    </div>
+                    <p class="text-xs text-red-300 mb-3">Use alternative detection methods:</p>
+                    <FallbackDetection 
+                      title="Alternative Detection"
+                      subtitle="Choose another way to classify your waste"
+                      showTips={false}
+                      on:detection={handleFallbackDetection}
+                      on:error={handleFallbackError}
+                      on:loading={handleFallbackLoading}
+                    />
                   </div>
                   
                   <!-- Troubleshooting tips -->
