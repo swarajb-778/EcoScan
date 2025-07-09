@@ -1210,20 +1210,12 @@
     @apply text-white bg-red-500 hover:bg-red-600;
   }
   
-  .btn-outline {
-    @apply bg-transparent border-current;
-  }
-  
   .btn-lg {
     @apply px-6 py-3 text-base;
   }
   
   .btn-sm {
     @apply px-3 py-1.5 text-sm;
-  }
-  
-  .btn-xs {
-    @apply px-2 py-1 text-xs;
   }
   
   .btn:disabled {

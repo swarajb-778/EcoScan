@@ -199,6 +199,9 @@
       <div class="method-card bg-white rounded-xl p-4 border-2 border-dashed border-gray-300 hover:border-blue-400 transition-colors"
            class:border-blue-400={dragOver}
            class:bg-blue-50={dragOver}
+           role="button"
+           tabindex="0"
+           aria-label="Upload image by dropping file or clicking to select"
            on:dragover={handleDragOver}
            on:dragleave={handleDragLeave}
            on:drop={handleDrop}>
