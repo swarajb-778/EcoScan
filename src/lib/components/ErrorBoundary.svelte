@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import { performanceMonitor } from '$lib/utils/performance';
+  import { isBrowser, safeNavigator } from '$lib/utils/browser';
 
   const dispatch = createEventDispatcher();
 
@@ -13,16 +14,59 @@
 
   let errorDetails = '';
   let expanded = false;
+  let canCopyToClipboard = false;
 
   onMount(() => {
+    if (!isBrowser()) {
+      console.warn('ErrorBoundary skipping browser-specific initialization during SSR');
+      return;
+    }
+
+    // Check if clipboard API is available
+    canCopyToClipboard = !!(navigator.clipboard && navigator.clipboard.writeText);
+
     if (error) {
       // Record error for analytics
-      performanceMonitor.recordError(error, context);
+      try {
+        performanceMonitor.recordError(error, context);
+      } catch (monitorError) {
+        console.warn('Failed to record error in performance monitor:', monitorError);
+      }
       
       // Format error details
-      errorDetails = `${error.name}: ${error.message}\n\nStack trace:\n${error.stack || 'No stack trace available'}`;
+      formatErrorDetails();
     }
   });
+
+  function formatErrorDetails() {
+    if (!error) return;
+
+    const navigator = safeNavigator();
+    const browserInfo = navigator ? {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      language: navigator.language,
+      cookieEnabled: navigator.cookieEnabled,
+      onLine: navigator.onLine
+    } : null;
+
+    errorDetails = `Error: ${error.name}: ${error.message}
+
+Context: ${context}
+Timestamp: ${new Date().toISOString()}
+
+Stack trace:
+${error.stack || 'No stack trace available'}
+
+${browserInfo ? `Browser Information:
+User Agent: ${browserInfo.userAgent}
+Platform: ${browserInfo.platform}
+Language: ${browserInfo.language}
+Cookies Enabled: ${browserInfo.cookieEnabled}
+Online: ${browserInfo.onLine}` : 'Browser info not available'}
+
+URL: ${isBrowser() && window.location ? window.location.href : 'N/A'}`;
+  }
 
   function handleRetry() {
     dispatch('retry');
@@ -32,102 +76,153 @@
     dispatch('dismiss');
   }
 
-  function copyErrorDetails() {
-    navigator.clipboard.writeText(errorDetails).then(() => {
-      alert('Error details copied to clipboard');
-    });
+  async function copyErrorDetails() {
+    if (!canCopyToClipboard || !isBrowser()) {
+      console.warn('Clipboard not available');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(errorDetails);
+      // Show success feedback (could be enhanced with a toast)
+      console.log('Error details copied to clipboard');
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
   }
 
   function toggleDetails() {
     expanded = !expanded;
   }
+
+  function getErrorSeverity(): 'low' | 'medium' | 'high' | 'critical' {
+    if (!error) return 'medium';
+    
+    const errorMessage = error.message.toLowerCase();
+    const errorName = error.name.toLowerCase();
+    
+    // Critical errors
+    if (errorName.includes('security') || errorMessage.includes('cors')) {
+      return 'critical';
+    }
+    
+    // High severity
+    if (errorName.includes('type') || errorMessage.includes('network') || errorMessage.includes('permission')) {
+      return 'high';
+    }
+    
+    // Low severity
+    if (errorMessage.includes('warning') || errorMessage.includes('deprecated')) {
+      return 'low';
+    }
+    
+    return 'medium';
+  }
+
+  function getSeverityColor(severity: string): string {
+    switch (severity) {
+      case 'critical': return 'bg-red-100 border-red-500 text-red-700';
+      case 'high': return 'bg-orange-100 border-orange-500 text-orange-700';
+      case 'medium': return 'bg-yellow-100 border-yellow-500 text-yellow-700';
+      case 'low': return 'bg-blue-100 border-blue-500 text-blue-700';
+      default: return 'bg-gray-100 border-gray-500 text-gray-700';
+    }
+  }
+
+  $: severity = getErrorSeverity();
+  $: severityColor = getSeverityColor(severity);
 </script>
 
-<div class="error-boundary bg-red-50 border border-red-200 rounded-lg p-6 max-w-md mx-auto">
-  <!-- Error Icon -->
-  <div class="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 rounded-full">
-    <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.864-.833-2.634 0L4.18 16.5c-.77.833.192 2.5 1.732 2.5z" />
-    </svg>
+<div class="error-boundary p-6 rounded-lg border-l-4 {severityColor}">
+  <!-- Error Header -->
+  <div class="flex items-start justify-between mb-4">
+    <div class="flex items-center">
+      <div class="mr-3">
+        {#if severity === 'critical'}
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+          </svg>
+        {:else if severity === 'high'}
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+          </svg>
+        {:else}
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+          </svg>
+        {/if}
+      </div>
+      <div>
+        <h3 class="text-lg font-semibold">{title}</h3>
+        <p class="text-sm opacity-75 capitalize">Severity: {severity}</p>
+      </div>
+    </div>
+    
+    <button 
+      on:click={handleDismiss} 
+      class="text-current opacity-50 hover:opacity-75 transition-opacity"
+      aria-label="Dismiss error"
+    >
+      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+      </svg>
+    </button>
   </div>
 
-  <!-- Error Title -->
-  <h3 class="text-lg font-semibold text-red-800 text-center mb-2">
-    {title}
-  </h3>
-
   <!-- Error Message -->
-  <p class="text-red-700 text-center mb-4">
-    {message}
-  </p>
+  <div class="mb-4">
+    <p class="text-sm">{message}</p>
+    {#if error}
+      <p class="text-xs mt-2 font-mono opacity-75">{error.name}: {error.message}</p>
+    {/if}
+  </div>
 
-  <!-- Error Actions -->
-  <div class="flex flex-col gap-2">
+  <!-- Action Buttons -->
+  <div class="flex flex-wrap gap-2 mb-4">
     {#if allowRetry}
       <button 
-        class="btn btn-primary btn-sm"
         on:click={handleRetry}
+        class="px-4 py-2 bg-current text-white rounded hover:opacity-90 transition-opacity text-sm"
       >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
         Try Again
       </button>
     {/if}
-
-    <button 
-      class="btn btn-ghost btn-sm"
-      on:click={handleDismiss}
-    >
-      Dismiss
-    </button>
-
-    {#if error && showDetails}
+    
+    {#if showDetails && error}
       <button 
-        class="btn btn-ghost btn-sm text-xs"
         on:click={toggleDetails}
+        class="px-4 py-2 border border-current rounded hover:bg-current hover:text-white transition-colors text-sm"
       >
         {expanded ? 'Hide' : 'Show'} Details
       </button>
+      
+      {#if canCopyToClipboard && errorDetails}
+        <button 
+          on:click={copyErrorDetails}
+          class="px-4 py-2 border border-current rounded hover:bg-current hover:text-white transition-colors text-sm"
+        >
+          Copy Error
+        </button>
+      {/if}
     {/if}
   </div>
 
   <!-- Error Details -->
-  {#if error && showDetails && expanded}
-    <div class="mt-4 p-3 bg-red-100 rounded border">
-      <div class="flex justify-between items-center mb-2">
-        <span class="text-xs font-medium text-red-700">Error Details</span>
-        <button 
-          class="text-xs text-red-600 hover:text-red-800"
-          on:click={copyErrorDetails}
-          title="Copy error details"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-        </button>
-      </div>
-      <pre class="text-xs text-red-800 overflow-auto max-h-32 whitespace-pre-wrap">{errorDetails}</pre>
+  {#if showDetails && expanded && errorDetails}
+    <div class="mt-4 p-4 bg-black bg-opacity-10 rounded text-xs">
+      <pre class="whitespace-pre-wrap overflow-x-auto">{errorDetails}</pre>
     </div>
   {/if}
 </div>
 
 <style>
   .error-boundary {
-    animation: slideIn 0.3s ease-out;
+    max-width: 100%;
+    word-wrap: break-word;
   }
-
-  @keyframes slideIn {
-    from {
-      opacity: 0;
-      transform: translateY(-20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    line-height: 1.4;
   }
 </style> 
