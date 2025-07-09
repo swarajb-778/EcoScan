@@ -53,8 +53,30 @@ export interface ClassificationData {
 
 // Performance monitoring types
 export interface PerformanceMetrics {
-  modelLoadTime: number;
-  inferenceTime: number;
-  frameRate: number;
+  averageInferenceTime: number;
+  fps: number;
   memoryUsage: number;
+  batteryLevel: number;
+  isCharging: boolean;
+  thermalState: 'normal' | 'fair' | 'serious' | 'critical';
+  lastUpdate: number;
+}
+
+export interface AppSettings {
+  theme: 'light' | 'dark' | 'auto';
+  soundEnabled: boolean;
+  hapticEnabled: boolean;
+  voiceEnabled: boolean;
+  language: string;
+  modelQuality: 'fast' | 'balanced' | 'accurate';
+  cameraResolution: '480p' | '720p' | '1080p';
+  autoCapture: boolean;
+  confidenceThreshold: number;
+}
+
+export interface AppLoadingState {
+  isLoading: boolean;
+  stage: 'idle' | 'initializing' | 'loading-model' | 'processing' | 'complete';
+  progress: number; // 0-100
+  message: string;
 } 

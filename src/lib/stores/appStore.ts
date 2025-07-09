@@ -1,5 +1,6 @@
-import { writable, derived } from 'svelte/store';
-import type { AppState, Detection, PerformanceMetrics } from '../types/index.js';
+import { writable, derived, type Writable } from 'svelte/store';
+import type { Detection, WasteClassification, PerformanceMetrics, AppSettings, AppLoadingState, AppState } from '../types/index.js';
+import { isBrowser, safeLocalStorage } from '../utils/browser.js';
 
 // Main application state
 export const appState = writable<AppState>({
@@ -10,30 +11,113 @@ export const appState = writable<AppState>({
   error: null
 });
 
-// Individual stores for specific state pieces
-export const isLoading = writable<boolean>(false);
-export const currentView = writable<'camera' | 'upload' | 'voice'>('camera');
-export const detections = writable<Detection[]>([]);
-export const selectedDetection = writable<Detection | null>(null);
-export const errorMessage = writable<string | null>(null);
+// SSR-safe store creation helper
+function createSSRSafeStore<T>(initialValue: T, key?: string): Writable<T> {
+  const store = writable<T>(initialValue);
+  
+  if (key && isBrowser()) {
+    // Try to load from localStorage on client-side
+    const storage = safeLocalStorage();
+    if (storage) {
+      try {
+        const stored = storage.getItem(key);
+        if (stored) {
+          const parsedValue = JSON.parse(stored);
+          store.set(parsedValue);
+        }
+      } catch (error) {
+        console.warn(`Failed to load ${key} from localStorage:`, error);
+      }
+    }
+  }
+  
+  return store;
+}
 
-// Camera and media state
-export const cameraStream = writable<MediaStream | null>(null);
-export const isRecording = writable<boolean>(false);
-export const permissionsGranted = writable<boolean>(false);
+// App state stores with SSR safety
+export const detections = createSSRSafeStore<Detection[]>([]);
+export const selectedDetection = createSSRSafeStore<Detection | null>(null);
+export const currentClassification = createSSRSafeStore<WasteClassification | null>(null);
 
-// Performance monitoring
-export const performanceMetrics = writable<PerformanceMetrics>({
-  modelLoadTime: 0,
-  inferenceTime: 0,
-  frameRate: 0,
-  memoryUsage: 0
+// UI state stores
+export const isLoading = createSSRSafeStore<boolean>(false);
+export const error = createSSRSafeStore<string | null>(null);
+export const success = createSSRSafeStore<string | null>(null);
+export const loadingState = createSSRSafeStore<AppLoadingState>({
+  isLoading: false,
+  stage: 'idle',
+  progress: 0,
+  message: ''
 });
 
-// Voice recognition state
-export const isListening = writable<boolean>(false);
-export const voiceSupported = writable<boolean>(false);
-export const lastTranscript = writable<string>('');
+// Camera state with SSR safety
+export const cameraStream = createSSRSafeStore<MediaStream | null>(null);
+export const isCameraActive = createSSRSafeStore<boolean>(false);
+export const permissionsGranted = createSSRSafeStore<boolean>(false);
+
+// Voice state
+export const isListening = createSSRSafeStore<boolean>(false);
+export const voiceSupported = createSSRSafeStore<boolean>(false);
+export const lastTranscript = createSSRSafeStore<string>('');
+
+// Settings with localStorage persistence
+export const settings = createSSRSafeStore<AppSettings>({
+  theme: 'auto',
+  soundEnabled: true,
+  hapticEnabled: true,
+  voiceEnabled: false,
+  language: 'en',
+  modelQuality: 'balanced',
+  cameraResolution: '720p',
+  autoCapture: false,
+  confidenceThreshold: 0.5
+}, 'ecoscan-settings');
+
+// Performance metrics with SSR safety
+export const performanceMetrics = createSSRSafeStore<PerformanceMetrics>({
+  averageInferenceTime: 0,
+  fps: 0,
+  memoryUsage: 0,
+  batteryLevel: 1,
+  isCharging: true,
+  thermalState: 'normal',
+  lastUpdate: Date.now()
+});
+
+// PWA install state
+export const showInstallPrompt = createSSRSafeStore<boolean>(false);
+export const isInstalled = createSSRSafeStore<boolean>(false);
+
+// Network state with SSR fallback
+export const isOnline = createSSRSafeStore<boolean>(true);
+
+// Initialize network state listener on client-side
+if (isBrowser()) {
+  const updateOnlineStatus = () => {
+    isOnline.set(navigator.onLine);
+  };
+  
+  // Set initial state
+  updateOnlineStatus();
+  
+  // Listen for changes
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+}
+
+// Persist settings changes to localStorage
+if (isBrowser()) {
+  settings.subscribe((value) => {
+    const storage = safeLocalStorage();
+    if (storage) {
+      try {
+        storage.setItem('ecoscan-settings', JSON.stringify(value));
+      } catch (error) {
+        console.warn('Failed to save settings to localStorage:', error);
+      }
+    }
+  });
+}
 
 // Derived stores for computed values
 export const hasDetections = derived(
@@ -87,29 +171,40 @@ export const selectDetection = (detection: Detection | null) => {
   selectedDetection.set(detection);
 };
 
-export const setError = (message: string | null) => {
-  errorMessage.set(message);
+// Helper functions
+export function setError(message: string | null) {
+  error.set(message);
   if (message) {
-    // Auto-clear error after 5 seconds
-    setTimeout(() => {
-      errorMessage.set(null);
-    }, 5000);
+    // Clear error after 5 seconds
+    setTimeout(() => error.set(null), 5000);
   }
-};
+}
 
-export const setLoadingState = (loading: boolean) => {
-  isLoading.set(loading);
-  if (loading) {
-    setError(null); // Clear errors when starting loading
+export function setSuccess(message: string | null) {
+  success.set(message);
+  if (message) {
+    // Clear success message after 3 seconds
+    setTimeout(() => success.set(null), 3000);
   }
-};
+}
 
-export const updatePerformanceMetric = (metric: keyof PerformanceMetrics, value: number) => {
+export function setLoadingState(isLoadingValue: boolean, stage?: string, progress?: number, message?: string) {
+  loadingState.set({
+    isLoading: isLoadingValue,
+    stage: stage || 'idle',
+    progress: progress || 0,
+    message: message || ''
+  });
+  isLoading.set(isLoadingValue);
+}
+
+export function updatePerformanceMetric(key: keyof PerformanceMetrics, value: number | string | boolean) {
   performanceMetrics.update(current => ({
     ...current,
-    [metric]: value
+    [key]: value,
+    lastUpdate: Date.now()
   }));
-};
+}
 
 // Camera utilities
 export const setCameraStream = (stream: MediaStream | null) => {
