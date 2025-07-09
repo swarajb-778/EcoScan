@@ -10,24 +10,26 @@
   let isInstallable = false;
 
   onMount(() => {
-    // Initialize analytics
-    initializeAnalytics();
-    
-    // Track page views
-    trackEvent('page_view', { path: $page.url.pathname });
-    
-    // Set up PWA install prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      installPrompt = e;
-      isInstallable = true;
-    });
+    if (typeof window !== 'undefined') {
+      // Initialize analytics
+      initializeAnalytics();
+      
+      // Track page views
+      trackEvent('page_view', { path: $page.url.pathname });
+      
+      // Set up PWA install prompt
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        installPrompt = e;
+        isInstallable = true;
+      });
 
-    // Track app installation
-    window.addEventListener('appinstalled', () => {
-      trackEvent('app_installed');
-      isInstallable = false;
-    });
+      // Track app installation
+      window.addEventListener('appinstalled', () => {
+        trackEvent('app_installed');
+        isInstallable = false;
+      });
+    }
   });
 
   function toggleMobileMenu() {
@@ -228,7 +230,7 @@
 
 <!-- Offline Indicator -->
 <div class="fixed bottom-4 left-4 z-40">
-  {#if !navigator.onLine}
+  {#if typeof navigator !== 'undefined' && !navigator.onLine}
     <div class="bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center space-x-2">
       <span class="text-sm">📡</span>
       <span class="text-sm font-medium">Offline Mode</span>

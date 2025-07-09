@@ -9,6 +9,7 @@
     setError 
   } from '$lib/stores/appStore.js';
   import type { WasteClassification } from '$lib/types/index.js';
+  import { isBrowser, isSpeechRecognitionSupported, isUserMediaSupported } from '$lib/utils/browser.js';
 
   let recognition: SpeechRecognition | null = null;
   let classifier: WasteClassifier | null = null;
@@ -17,30 +18,42 @@
   let isInitializing = false;
 
   onMount(async () => {
+    if (!isBrowser()) {
+      console.warn('VoiceInput skipping initialization during SSR');
+      return;
+    }
+    
     await initializeVoiceRecognition();
     await initializeClassifier();
   });
 
   async function initializeVoiceRecognition() {
-    // Check for browser support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!isBrowser()) return;
     
-    if (!SpeechRecognition) {
+    // Check for browser support using our utility
+    if (!isSpeechRecognitionSupported()) {
       voiceSupported.set(false);
       setError('Voice recognition not supported in this browser.');
       return;
     }
 
     // Check for microphone
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (!isUserMediaSupported()) {
       setError('Microphone access is not supported in this browser.');
       voiceSupported.set(false);
       return;
     }
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const audioInputs = devices.filter(d => d.kind === 'audioinput');
-    if (audioInputs.length === 0) {
-      setError('No microphone device found. Please connect a microphone and try again.');
+    
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      if (audioInputs.length === 0) {
+        setError('No microphone device found. Please connect a microphone and try again.');
+        voiceSupported.set(false);
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking microphone devices:', error);
       voiceSupported.set(false);
       return;
     }
@@ -48,6 +61,7 @@
     voiceSupported.set(true);
     
     // Initialize speech recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
@@ -123,7 +137,7 @@
   }
 
   function startListening() {
-    if (!recognition || !$voiceSupported) {
+    if (!isBrowser() || !recognition || !$voiceSupported) {
       setError('Voice recognition not available');
       return;
     }
