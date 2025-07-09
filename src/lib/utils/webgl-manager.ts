@@ -3,6 +3,8 @@
  * Handles WebGL context loss, recovery, and GPU memory management
  */
 
+import { isBrowser, safeCreateCanvas, safeDocument, safeWindow, safeNavigator } from './browser.js';
+
 export interface WebGLContextConfig {
   maxTextureSize: number;
   maxVertexAttribs: number;
@@ -55,6 +57,10 @@ export class WebGLContextManager {
   }
 
   private createCanvas(): HTMLCanvasElement {
+    if (!isBrowser()) {
+      throw new Error('Cannot create canvas during SSR');
+    }
+    
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 1;
@@ -163,6 +169,11 @@ export class WebGLContextManager {
   }
 
   private setupEventListeners(): void {
+    if (!isBrowser()) {
+      console.warn('Skipping event listeners setup during SSR');
+      return;
+    }
+
     // WebGL context lost event
     const contextLostListener = (event: Event) => {
       event.preventDefault();
@@ -180,24 +191,30 @@ export class WebGLContextManager {
     this.eventListeners.set('webglcontextlost', contextLostListener);
     this.eventListeners.set('webglcontextrestored', contextRestoredListener);
 
+    const navigator = safeNavigator();
+    const window = safeWindow();
+    const document = safeDocument();
+
     // Memory pressure event (if available)
-    if ('memory' in navigator) {
+    if (navigator && 'memory' in navigator && window) {
       window.addEventListener('memory', () => {
         this.handleMemoryPressure();
       });
     }
 
     // Page visibility change
-    const visibilityChangeListener = () => {
-      if (document.hidden) {
-        this.handlePageHidden();
-      } else {
-        this.handlePageVisible();
-      }
-    };
+    if (document && window) {
+      const visibilityChangeListener = () => {
+        if (document.hidden) {
+          this.handlePageHidden();
+        } else {
+          this.handlePageVisible();
+        }
+      };
 
-    document.addEventListener('visibilitychange', visibilityChangeListener);
-    this.eventListeners.set('visibilitychange', visibilityChangeListener);
+      document.addEventListener('visibilitychange', visibilityChangeListener);
+      this.eventListeners.set('visibilitychange', visibilityChangeListener);
+    }
   }
 
   private handleContextLoss(): void {
@@ -211,9 +228,12 @@ export class WebGLContextManager {
     this.clearOperations();
 
     // Notify applications
-    window.dispatchEvent(new CustomEvent('webgl-context-lost', {
-      detail: { manager: this, state: this.state }
-    }));
+    const window = safeWindow();
+    if (window) {
+      window.dispatchEvent(new CustomEvent('webgl-context-lost', {
+        detail: { manager: this, state: this.state }
+      }));
+    }
   }
 
   private async handleContextRestore(): Promise<void> {
@@ -239,9 +259,12 @@ export class WebGLContextManager {
         console.log('✅ WebGL context restored successfully');
         
         // Notify applications
-        window.dispatchEvent(new CustomEvent('webgl-context-restored', {
-          detail: { manager: this, state: this.state }
-        }));
+        const window = safeWindow();
+        if (window) {
+          window.dispatchEvent(new CustomEvent('webgl-context-restored', {
+            detail: { manager: this, state: this.state }
+          }));
+        }
       } else {
         throw new Error('Failed to reinitialize WebGL context');
       }
@@ -253,21 +276,24 @@ export class WebGLContextManager {
   }
 
   private handleMemoryPressure(): void {
-    console.warn('💾 GPU memory pressure detected');
+    console.warn('🔥 GPU memory pressure detected');
     
-    // Implement memory reduction strategies
+    // Clear unused resources
     this.clearUnusedTextures();
     this.reduceTextureQuality();
     
     // Force garbage collection if available
-    if ('gc' in window) {
+    const window = safeWindow();
+    if (window && 'gc' in window) {
       (window as any).gc();
     }
 
     // Notify applications to reduce memory usage
-    window.dispatchEvent(new CustomEvent('gpu-memory-pressure', {
-      detail: { memoryUsage: this.state.memoryUsage, limit: this.config.memoryLimit }
-    }));
+    if (window) {
+      window.dispatchEvent(new CustomEvent('gpu-memory-pressure', {
+        detail: { memoryUsage: this.state.memoryUsage, limit: this.config.memoryLimit }
+      }));
+    }
   }
 
   private handlePageHidden(): void {
@@ -394,9 +420,11 @@ export class WebGLContextManager {
       clearInterval(this.memoryMonitorInterval);
     }
 
+    const document = safeDocument();
+
     // Remove event listeners
     this.eventListeners.forEach((listener, event) => {
-      if (event === 'visibilitychange') {
+      if (event === 'visibilitychange' && document) {
         document.removeEventListener(event, listener);
       } else {
         this.canvas.removeEventListener(event, listener);
@@ -416,13 +444,34 @@ export class WebGLContextManager {
   }
 }
 
-// Global instance for easy access
-export const webglManager = new WebGLContextManager();
+// Lazy singleton instance for browser-only access
+let _webglManager: WebGLContextManager | null = null;
+
+export function getWebGLManager(): WebGLContextManager | null {
+  if (typeof window === 'undefined') {
+    // Return null during SSR
+    return null;
+  }
+  
+  if (!_webglManager) {
+    try {
+      _webglManager = new WebGLContextManager();
+    } catch (error) {
+      console.error('Failed to create WebGL manager:', error);
+      return null;
+    }
+  }
+  
+  return _webglManager;
+}
 
 // Utility functions
 export function isWebGLSupported(): boolean {
+  if (!isBrowser()) return false;
+  
   try {
-    const canvas = document.createElement('canvas');
+    const canvas = safeCreateCanvas();
+    if (!canvas) return false;
     return !!(canvas.getContext('webgl') || canvas.getContext('webgl2'));
   } catch {
     return false;
@@ -436,24 +485,40 @@ export function getWebGLCapabilities(): {
   maxVertexAttribs: number;
   extensions: string[];
 } {
-  const canvas = document.createElement('canvas');
-  const gl1 = canvas.getContext('webgl');
-  const gl2 = canvas.getContext('webgl2');
-  
-  const result = {
-    webgl1: !!gl1,
-    webgl2: !!gl2,
+  const defaultResult = {
+    webgl1: false,
+    webgl2: false,
     maxTextureSize: 0,
     maxVertexAttribs: 0,
     extensions: [] as string[]
   };
 
-  const gl = gl2 || gl1;
-  if (gl) {
-    result.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    result.maxVertexAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
-    result.extensions = gl.getSupportedExtensions() || [];
-  }
+  if (!isBrowser()) return defaultResult;
 
-  return result;
+  try {
+    const canvas = safeCreateCanvas();
+    if (!canvas) return defaultResult;
+    
+    const gl1 = canvas.getContext('webgl');
+    const gl2 = canvas.getContext('webgl2');
+    
+    const result = {
+      webgl1: !!gl1,
+      webgl2: !!gl2,
+      maxTextureSize: 0,
+      maxVertexAttribs: 0,
+      extensions: [] as string[]
+    };
+
+    const gl = gl2 || gl1;
+    if (gl) {
+      result.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      result.maxVertexAttribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+      result.extensions = gl.getSupportedExtensions() || [];
+    }
+
+    return result;
+  } catch {
+    return defaultResult;
+  }
 } 
