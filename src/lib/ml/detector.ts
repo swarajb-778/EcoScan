@@ -1,7 +1,7 @@
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
 import { getWebGLManager } from '../utils/webgl-manager.js';
-import { adaptiveEngine, type OptimizationStrategy } from './adaptive-engine.js';
+import { getAdaptiveEngine, type OptimizationStrategy } from './adaptive-engine.js';
 import { abTestingFramework } from '$lib/utils/ab-testing.js';
 import { modelExperiment } from '$lib/experiments';
 import { isBrowser } from '../utils/browser.js';
@@ -98,7 +98,7 @@ export class ObjectDetector {
     window.addEventListener('adaptive-config-change', this.adaptiveConfigBound);
     
     // Initialize with current adaptive config
-    const adaptiveConfig = adaptiveEngine.getCurrentConfig();
+    const adaptiveConfig = getAdaptiveEngine().getCurrentConfig();
     this.applyAdaptiveConfig(adaptiveConfig);
   }
 
@@ -450,6 +450,7 @@ export class ObjectDetector {
     }
 
     // Get current adaptive strategy
+    const adaptiveEngine = getAdaptiveEngine();
     const strategy = adaptiveEngine.getCurrentStrategy();
     
     // Handle frame skipping for performance optimization
@@ -530,6 +531,7 @@ export class ObjectDetector {
       console.error('❌ Adaptive detection failed:', error);
       
       // Update adaptive engine with error information
+      const adaptiveEngine = getAdaptiveEngine();
       adaptiveEngine.updatePerformanceMetrics({
         errors: this.modelState.failureCount,
         averageInferenceTime: performance.now() - inferenceStart
@@ -787,22 +789,29 @@ export class ObjectDetector {
   }
 
   private updatePerformanceMetrics(inferenceTime: number, objectCount: number): void {
-    // Track inference time history
+    // Calculate FPS estimate
+    const currentTime = Date.now();
+    const timeSinceLastInference = currentTime - this.lastInferenceTime;
+    const estimatedFPS = timeSinceLastInference > 0 ? 1000 / timeSinceLastInference : 0;
+    
+    this.lastInferenceTime = currentTime;
+    
+    // Update inference history
     this.inferenceHistory.push(inferenceTime);
-    if (this.inferenceHistory.length > 20) {
+    if (this.inferenceHistory.length > 10) {
       this.inferenceHistory.shift();
     }
     
     // Calculate average inference time
-    const avgInferenceTime = this.inferenceHistory.reduce((a, b) => a + b, 0) / this.inferenceHistory.length;
+    const averageInferenceTime = this.inferenceHistory.reduce((a, b) => a + b, 0) / this.inferenceHistory.length;
     
-    // Update adaptive engine with performance metrics
+    // Update adaptive engine
+    const adaptiveEngine = getAdaptiveEngine();
     adaptiveEngine.updatePerformanceMetrics({
-      averageInferenceTime: avgInferenceTime,
-      memoryUsage: this.estimateMemoryUsage()
+      fps: estimatedFPS,
+      averageInferenceTime,
+      errors: this.modelState.failureCount
     });
-    
-    this.lastInferenceTime = inferenceTime;
   }
 
   private estimateMemoryUsage(): number {

@@ -3,6 +3,8 @@
  * Dynamically adjusts ML performance based on device capabilities and conditions
  */
 
+import { isBrowser, safeCreateCanvas, safeNavigator, safeWindow } from '../utils/browser.js';
+
 export interface DeviceCapabilities {
   cpuCores: number;
   memoryGB: number;
@@ -83,20 +85,28 @@ export class AdaptiveInferenceEngine {
   private readonly HISTORY_LENGTH = 50;
 
   constructor() {
-    this.deviceCapabilities = this.detectDeviceCapabilities();
+    if (!isBrowser()) {
+      // Create minimal fallback state for SSR
+      this.deviceCapabilities = this.getFallbackCapabilities();
+    } else {
+      this.deviceCapabilities = this.detectDeviceCapabilities();
+    }
+    
     this.thermalState = {
       level: 'normal',
       throttlingActive: false,
       lastUpdate: Date.now()
     };
+    
     this.batteryState = {
       level: 1.0,
       charging: true,
       lastUpdate: Date.now()
     };
+    
     this.performanceState = {
       fps: 30,
-      averageInferenceTime: 100,
+      averageInferenceTime: 50,
       memoryUsage: 0,
       cpuUsage: 0,
       errors: 0,
@@ -106,28 +116,60 @@ export class AdaptiveInferenceEngine {
     this.config = this.getInitialConfig();
     this.strategy = this.getBaseStrategy();
     
-    this.startMonitoring();
+    if (isBrowser()) {
+      this.startMonitoring();
+    }
+  }
+
+  private getFallbackCapabilities(): DeviceCapabilities {
+    return {
+      cpuCores: 4,
+      memoryGB: 4,
+      isLowEndDevice: false,
+      hasGPU: false,
+      supportedAPIs: {
+        webgl: false,
+        webgl2: false,
+        webasm: true,
+        webnn: false
+      },
+      browserTier: 'medium'
+    };
   }
 
   private detectDeviceCapabilities(): DeviceCapabilities {
+    if (!isBrowser()) {
+      return this.getFallbackCapabilities();
+    }
+
     // CPU cores detection
-    const cpuCores = navigator.hardwareConcurrency || 4;
+    const navigator = safeNavigator();
+    const cpuCores = navigator?.hardwareConcurrency || 4;
     
     // Memory estimation (approximate)
     const memoryGB = this.estimateMemory();
     
     // GPU detection
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
-    const hasGPU = !!gl;
-    
-    // Browser and API support
-    const supportedAPIs = {
-      webgl: !!canvas.getContext('webgl'),
-      webgl2: !!canvas.getContext('webgl2'),
+    const canvas = safeCreateCanvas();
+    let hasGPU = false;
+    let supportedAPIs = {
+      webgl: false,
+      webgl2: false,
       webasm: typeof WebAssembly !== 'undefined',
-      webnn: 'ml' in navigator
+      webnn: false
     };
+
+    if (canvas) {
+      const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+      hasGPU = !!gl;
+      
+      supportedAPIs = {
+        webgl: !!canvas.getContext('webgl'),
+        webgl2: !!canvas.getContext('webgl2'),
+        webasm: typeof WebAssembly !== 'undefined',
+        webnn: navigator && 'ml' in navigator
+      };
+    }
     
     // Device tier classification
     const isLowEndDevice = cpuCores <= 2 || memoryGB <= 2;
@@ -144,6 +186,8 @@ export class AdaptiveInferenceEngine {
   }
 
   private estimateMemory(): number {
+    if (!isBrowser()) return 4; // Default fallback
+    
     // Use performance.memory if available
     if ('memory' in performance) {
       const memInfo = (performance as any).memory;
@@ -153,6 +197,9 @@ export class AdaptiveInferenceEngine {
     }
     
     // Fallback estimation based on user agent and other factors
+    const navigator = safeNavigator();
+    if (!navigator) return 4;
+    
     const userAgent = navigator.userAgent.toLowerCase();
     
     if (userAgent.includes('mobile')) {
@@ -310,7 +357,7 @@ export class AdaptiveInferenceEngine {
 
   private async updateBatteryState(): Promise<void> {
     try {
-      if ('getBattery' in navigator) {
+      if (isBrowser() && 'getBattery' in navigator) {
         const battery = await (navigator as any).getBattery();
         this.batteryState = {
           level: battery.level,
@@ -326,26 +373,25 @@ export class AdaptiveInferenceEngine {
   }
 
   private adaptConfiguration(): void {
+    if (!isBrowser()) return;
+    
     const newStrategy = this.calculateOptimalStrategy();
     const configChanged = this.updateConfigIfNeeded(newStrategy);
     
     if (configChanged) {
-      console.log('🔧 Adaptive configuration updated:', {
-        strategy: newStrategy,
-        thermal: this.thermalState.level,
-        battery: `${Math.round(this.batteryState.level * 100)}%`,
-        fps: this.performanceState.fps
-      });
-      
-      // Dispatch configuration change event
-      window.dispatchEvent(new CustomEvent('adaptive-config-change', {
-        detail: {
-          strategy: newStrategy,
-          config: this.config,
-          thermalState: this.thermalState,
-          batteryState: this.batteryState
-        }
-      }));
+      const window = safeWindow();
+      if (window) {
+        window.dispatchEvent(new CustomEvent('adaptive-config-change', {
+          detail: {
+            config: this.config,
+            strategy: this.strategy,
+            deviceCapabilities: this.deviceCapabilities,
+            thermalState: this.thermalState,
+            batteryState: this.batteryState,
+            performanceState: this.performanceState
+          }
+        }));
+      }
     }
   }
 
@@ -547,5 +593,12 @@ export class AdaptiveInferenceEngine {
   }
 }
 
-// Global instance for easy access
-export const adaptiveEngine = new AdaptiveInferenceEngine(); 
+// Lazy singleton instance for browser-only access
+let _adaptiveEngine: AdaptiveInferenceEngine | null = null;
+
+export function getAdaptiveEngine(): AdaptiveInferenceEngine {
+  if (!_adaptiveEngine) {
+    _adaptiveEngine = new AdaptiveInferenceEngine();
+  }
+  return _adaptiveEngine;
+} 
