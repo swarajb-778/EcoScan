@@ -40,7 +40,7 @@
     }
     
     await initializeML();
-    await startCamera();
+    await checkExistingPermissions();
   });
 
   onDestroy(() => {
@@ -397,6 +397,54 @@
     setupCanvas();
     startDetectionLoop();
   }
+
+  // Enhanced camera permission request
+  async function requestCameraPermission() {
+    if (!isBrowser()) return;
+    
+    console.log('📷 User requested camera permission');
+    setError(null); // Clear any previous errors
+    await startCamera();
+  }
+
+  // Retry camera initialization
+  async function retryCamera() {
+    if (!isBrowser()) return;
+    
+    console.log('📷 Retrying camera initialization');
+    setError(null);
+    permissionsGranted.set(false);
+    await startCamera();
+  }
+
+  // Auto-start camera if permissions were previously granted
+  async function checkExistingPermissions() {
+    if (!isBrowser() || !navigator.permissions) return;
+    
+    try {
+      const permissionStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      console.log('📷 Existing camera permission:', permissionStatus.state);
+      
+      if (permissionStatus.state === 'granted') {
+        console.log('📷 Camera permission already granted, auto-starting...');
+        await startCamera();
+      }
+      
+      // Listen for permission changes
+      permissionStatus.addEventListener('change', () => {
+        console.log('📷 Camera permission changed to:', permissionStatus.state);
+        if (permissionStatus.state === 'granted' && !$permissionsGranted) {
+          startCamera();
+        } else if (permissionStatus.state === 'denied') {
+          setError('Camera permission was denied. Please enable camera access in your browser settings.');
+          permissionsGranted.set(false);
+        }
+      });
+    } catch (error) {
+      console.warn('📷 Could not check existing camera permissions:', error);
+      // Fallback: just show the permission request UI
+    }
+  }
 </script>
 
 <svelte:window on:resize={handleResize} />
@@ -422,13 +470,59 @@
     class="absolute inset-0 cursor-pointer"
   />
 
-  <!-- Loading overlay -->
+  <!-- Loading overlay with enhanced UX -->
   {#if !$permissionsGranted}
-    <div class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-      <div class="text-center text-white">
-        <div class="loading-spinner w-12 h-12 mx-auto mb-4"></div>
-        <p class="text-lg font-medium">Starting camera...</p>
-        <p class="text-sm opacity-75">Please allow camera access</p>
+    <div class="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
+      <div class="text-center text-white p-6 max-w-sm">
+        {#if $isLoading}
+          <div class="loading-spinner w-16 h-16 mx-auto mb-6"></div>
+          <p class="text-xl font-medium mb-2">Starting camera...</p>
+          <p class="text-sm opacity-75">Please wait while we initialize your camera</p>
+        {:else}
+          <!-- Permission request UI -->
+          <div class="mb-6">
+            <div class="w-16 h-16 mx-auto mb-4 bg-green-500 rounded-full flex items-center justify-center">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-2">Camera Access Required</h3>
+            <p class="text-sm opacity-90 leading-relaxed">
+              EcoScan needs camera access to detect and classify waste items in real-time. 
+              Your privacy is protected - images are processed locally and never uploaded.
+            </p>
+          </div>
+          
+          <button 
+            class="btn btn-primary btn-lg w-full mb-4"
+            on:click={requestCameraPermission}
+            disabled={$isLoading}
+          >
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+            </svg>
+            Enable Camera
+          </button>
+          
+          <div class="text-xs opacity-70 space-y-1">
+            <p>• Real-time waste detection</p>
+            <p>• Completely private & secure</p>
+            <p>• No data leaves your device</p>
+          </div>
+        {/if}
+        
+        {#if $error}
+          <div class="mt-4 p-3 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg text-sm">
+            <p class="font-medium">⚠️ Camera Error</p>
+            <p class="mt-1 opacity-90">{$error}</p>
+            <button 
+              class="btn btn-sm btn-outline mt-3"
+              on:click={retryCamera}
+            >
+              Try Again
+            </button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
