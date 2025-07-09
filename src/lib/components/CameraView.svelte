@@ -76,36 +76,122 @@
   async function startCamera() {
     if (!isBrowser()) return;
     
+    console.log('📷 Starting camera initialization...');
     setLoadingState(true);
     try {
       if (!isUserMediaSupported()) {
         setError('Camera access is not supported in this browser.');
+        console.error('❌ Camera not supported');
         return;
       }
       
+      console.log('📷 Checking available camera devices...');
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
+      console.log('📷 Found camera devices:', videoInputs.length);
+      
       if (videoInputs.length === 0) {
         setError('No camera device found. Please connect a camera and try again.');
+        console.error('❌ No camera devices found');
         return;
       }
-      // Try to get user media
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      
+      console.log('📷 Requesting camera stream...');
+      // Try to get user media with enhanced constraints
+      const constraints = {
+        video: {
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 30, max: 60 },
+          facingMode: 'environment' // Prefer rear camera on mobile
+        }
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('✅ Camera stream obtained successfully');
+      console.log('📷 Stream details:', {
+        tracks: stream.getTracks().length,
+        videoTracks: stream.getVideoTracks().length,
+        settings: stream.getVideoTracks()[0]?.getSettings()
+      });
+      
+      // Validate stream
+      if (!stream || stream.getVideoTracks().length === 0) {
+        throw new Error('Invalid camera stream received');
+      }
+      
       setCameraStream(stream);
       videoElement.srcObject = stream;
-      videoElement.onloadedmetadata = () => videoElement.play();
-      // Handle stream interruption
-      stream.getVideoTracks()[0].onended = () => {
-        setError('Camera stream was interrupted. Please refresh or re-enable your camera.');
+      
+      // Enhanced video element handling
+      videoElement.onloadedmetadata = () => {
+        console.log('📷 Video metadata loaded:', {
+          width: videoElement.videoWidth,
+          height: videoElement.videoHeight,
+          duration: videoElement.duration
+        });
+        videoElement.play().then(() => {
+          console.log('✅ Video playback started successfully');
+          // Additional validation
+          if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+            setError('Invalid video dimensions. Please check your camera.');
+          }
+        }).catch(err => {
+          console.error('❌ Video playback failed:', err);
+          setError('Failed to start video playback.');
+        });
       };
+      
+      videoElement.onerror = (err) => {
+        console.error('❌ Video element error:', err);
+        setError('Video element error occurred.');
+      };
+      
+      // Handle stream interruption with better logging
+      stream.getVideoTracks()[0].onended = () => {
+        console.warn('📷 Camera stream ended unexpectedly');
+        setError('Camera stream was interrupted. Please refresh or re-enable your camera.');
+        permissionsGranted.set(false);
+      };
+      
+      // Monitor stream health
+      const videoTrack = stream.getVideoTracks()[0];
+      console.log('📷 Video track state:', videoTrack.readyState);
+      console.log('📷 Video track settings:', videoTrack.getSettings());
+      
     } catch (err: any) {
+      console.error('❌ Camera initialization failed:', err);
+      console.error('Error details:', {
+        name: err.name,
+        message: err.message,
+        constraint: err.constraint,
+        stack: err.stack
+      });
+      
       if (err && err.name === 'NotAllowedError') {
-        setError('Camera permission denied. Please allow camera access in your browser settings.');
+        setError('Camera permission denied. Please allow camera access in your browser settings and refresh the page.');
+      } else if (err.name === 'NotFoundError') {
+        setError('No camera found. Please check if your device has a camera.');
+      } else if (err.name === 'NotReadableError') {
+        setError('Camera is already in use by another application. Please close other camera apps and try again.');
+      } else if (err.name === 'OverconstrainedError') {
+        console.warn('�� Camera constraints too restrictive, trying fallback...');
+        // Try with minimal constraints
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          setCameraStream(fallbackStream);
+          videoElement.srcObject = fallbackStream;
+          videoElement.onloadedmetadata = () => videoElement.play();
+          console.log('✅ Fallback camera stream successful');
+        } catch (fallbackErr) {
+          setError('Camera does not support the required settings. Please try a different camera.');
+        }
       } else {
         setError('Failed to access camera: ' + (err?.message || err));
       }
     } finally {
       setLoadingState(false);
+      console.log('📷 Camera initialization process completed');
     }
   }
 
