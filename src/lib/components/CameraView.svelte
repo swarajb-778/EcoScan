@@ -6,6 +6,7 @@
     detections, 
     selectedDetection, 
     setError, 
+    setSuccess,
     setLoadingState,
     setCameraStream,
     stopCamera,
@@ -17,9 +18,9 @@
     loadingState
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
-  import { getQRScanSupportMessage } from '$lib/utils/qr.js';
-  import { isBrowser, isUserMediaSupported } from '$lib/utils/browser.js';
+  import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument } from '$lib/utils/browser.js';
 
+  // Component state
   let videoElement: HTMLVideoElement;
   let canvasElement: HTMLCanvasElement;
   let overlayCanvasElement: HTMLCanvasElement;
@@ -29,7 +30,16 @@
   let isDetecting = false;
   let lastFrameTime = 0;
   let frameCount = 0;
+  let mountStartTime = 0;
 
+  // Local component state for SSR safety
+  let localIsLoading = false;
+  let localError: string | null = null;
+  let localPermissionsGranted = false;
+  let initializationAttempts = 0;
+  let maxRetryAttempts = 3;
+
+  // Model configuration
   const modelConfig: ModelConfig = {
     modelPath: '/models/yolov8n.onnx',
     inputSize: [640, 640],
@@ -37,316 +47,505 @@
     iouThreshold: 0.4
   };
 
+  // SSR-safe reactive statements
+  $: browserIsLoading = isBrowser() ? $isLoading : localIsLoading;
+  $: browserError = isBrowser() ? $error : localError;
+  $: browserPermissionsGranted = isBrowser() ? $permissionsGranted : localPermissionsGranted;
+
+  // Component lifecycle
   onMount(async () => {
     if (!isBrowser()) {
-      console.warn('CameraView skipping initialization during SSR');
+      console.warn('🚫 CameraView: Skipping initialization during SSR');
       return;
     }
     
-    await initializeML();
-    await checkExistingPermissions();
+    mountStartTime = performance.now();
+    console.log('🎬 CameraView: Starting component initialization...');
+    
+    try {
+      // Initialize ML models first
+      await initializeML();
+      
+      // Check existing permissions and potentially auto-start camera
+      await checkExistingPermissions();
+      
+      const mountTime = performance.now() - mountStartTime;
+      console.log(`✅ CameraView: Component initialized in ${mountTime.toFixed(0)}ms`);
+      updatePerformanceMetric('componentMountTime', mountTime);
+    } catch (error) {
+      console.error('❌ CameraView: Initialization failed:', error);
+      setError(`Component initialization failed: ${error}`);
+    }
   });
 
   onDestroy(() => {
+    console.log('🧹 CameraView: Cleaning up component...');
     cleanup();
   });
 
+  // Initialize ML models with comprehensive error handling
   async function initializeML() {
     if (!isBrowser()) return;
     
-    setLoadingState(true);
+    console.log('🤖 Initializing ML models...');
+    localIsLoading = true;
+    setLoadingState(true, 'models', 0, 'Loading AI models...');
+    
     try {
-      // Initialize the ML models
-      detector = new ObjectDetector(modelConfig);
-      classifier = new WasteClassifier();
+      // Initialize models with timeout protection
+      const initPromise = Promise.all([
+        initializeDetector(),
+        initializeClassifier()
+      ]);
+      
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Model loading timeout (30s)')), 30000);
+      });
       
       const startTime = performance.now();
-      await Promise.all([
-        detector.initialize(),
-        classifier.initialize()
-      ]);
+      await Promise.race([initPromise, timeoutPromise]);
       const loadTime = performance.now() - startTime;
       
       updatePerformanceMetric('modelLoadTime', loadTime);
-      console.log(`🚀 Models loaded in ${loadTime.toFixed(0)}ms`);
+      console.log(`🚀 ML models loaded in ${loadTime.toFixed(0)}ms`);
+      setSuccess('AI models loaded successfully');
+      
     } catch (error) {
-      setError(`Failed to load AI models: ${error}`);
-      console.error('Model initialization error:', error);
+      const errorMessage = `Failed to load AI models: ${error}`;
+      console.error('❌ ML initialization error:', error);
+      localError = errorMessage;
+      setError(errorMessage);
+      throw error;
     } finally {
+      localIsLoading = false;
       setLoadingState(false);
     }
   }
 
+  async function initializeDetector(): Promise<void> {
+    console.log('🔍 Loading object detector...');
+    detector = new ObjectDetector(modelConfig);
+    setLoadingState(true, 'detector', 25, 'Loading object detector...');
+    await detector.initialize();
+    console.log('✅ Object detector ready');
+  }
+
+  async function initializeClassifier(): Promise<void> {
+    console.log('🏷️ Loading waste classifier...');  
+    classifier = new WasteClassifier();
+    setLoadingState(true, 'classifier', 75, 'Loading waste classifier...');
+    await classifier.initialize();
+    console.log('✅ Waste classifier ready');
+  }
+
+  // Enhanced camera initialization with robust error handling
   async function startCamera() {
-    if (!isBrowser()) return;
+    if (!isBrowser()) {
+      console.warn('🚫 Camera: Cannot start camera during SSR');
+      return;
+    }
     
-    console.log('📷 Starting camera initialization...');
-    setLoadingState(true);
+    initializationAttempts++;
+    console.log(`📷 Camera: Starting initialization (attempt ${initializationAttempts}/${maxRetryAttempts})...`);
+    
+    localIsLoading = true;
+    localError = null;
+    setLoadingState(true, 'camera', 0, 'Initializing camera...');
+    setError(null);
+    
     try {
+      // Comprehensive browser support check
       if (!isUserMediaSupported()) {
-        setError('Camera access is not supported in this browser.');
-        console.error('❌ Camera not supported');
-        return;
+        throw new Error('Camera access is not supported in this browser. Please use Chrome, Firefox, Safari, or Edge.');
       }
       
-      console.log('📷 Checking available camera devices...');
+      const navigator = safeNavigator();
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error('Media devices API not available. Please ensure you\'re using HTTPS or localhost.');
+      }
+      
+      // Check available devices
+      console.log('📷 Camera: Checking available devices...');
+      setLoadingState(true, 'camera', 25, 'Checking camera devices...');
+      
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
-      console.log('📷 Found camera devices:', videoInputs.length);
+      
+      console.log('📷 Camera devices found:', {
+        total: devices.length,
+        videoInputs: videoInputs.length,
+        devices: videoInputs.map(d => ({
+          deviceId: d.deviceId.substring(0, 8) + '...',
+          label: d.label || 'Unknown Device'
+        }))
+      });
       
       if (videoInputs.length === 0) {
-        setError('No camera device found. Please connect a camera and try again.');
-        console.error('❌ No camera devices found');
-        return;
+        throw new Error('No camera device found. Please connect a camera and refresh the page.');
       }
       
-      console.log('📷 Requesting camera stream...');
-      // Try to get user media with enhanced constraints
-      const constraints = {
-        video: {
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 30, max: 60 },
-          facingMode: 'environment' // Prefer rear camera on mobile
-        }
-      };
+      // Request camera stream with progressive constraints
+      console.log('📷 Camera: Requesting camera stream...');
+      setLoadingState(true, 'camera', 50, 'Requesting camera access...');
       
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      console.log('✅ Camera stream obtained successfully');
-      console.log('📷 Stream details:', {
+      const stream = await getUserMediaWithFallback();
+      
+      // Validate stream
+      if (!stream || stream.getVideoTracks().length === 0) {
+        throw new Error('Invalid camera stream received. Please try again.');
+      }
+      
+      console.log('✅ Camera: Stream obtained successfully');
+      console.log('📷 Camera: Stream details:', {
+        id: stream.id,
+        active: stream.active,
         tracks: stream.getTracks().length,
         videoTracks: stream.getVideoTracks().length,
         settings: stream.getVideoTracks()[0]?.getSettings()
       });
       
-      // Validate stream
-      if (!stream || stream.getVideoTracks().length === 0) {
-        throw new Error('Invalid camera stream received');
+      // Set up video element
+      setLoadingState(true, 'camera', 75, 'Setting up video stream...');
+      await setupVideoElement(stream);
+      
+      // Update stores
+      setCameraStream(stream);
+      localPermissionsGranted = true;
+      
+      console.log('✅ Camera: Successfully initialized and ready');
+      setSuccess('Camera initialized successfully');
+      
+      // Reset retry attempts on success
+      initializationAttempts = 0;
+      
+    } catch (error: any) {
+      console.error('❌ Camera: Initialization failed:', error);
+      
+      const errorMessage = handleCameraError(error);
+      localError = errorMessage;
+      setError(errorMessage);
+      localPermissionsGranted = false;
+      
+      // Retry logic for transient errors
+      if (shouldRetryCamera(error) && initializationAttempts < maxRetryAttempts) {
+        console.log(`🔄 Camera: Will retry in 2 seconds (attempt ${initializationAttempts + 1}/${maxRetryAttempts})`);
+        setTimeout(() => startCamera(), 2000);
+        return;
       }
       
-      setCameraStream(stream);
-      videoElement.srcObject = stream;
+    } finally {
+      localIsLoading = false;
+      setLoadingState(false);
+    }
+  }
+
+  // Progressive camera constraints with fallbacks
+  async function getUserMediaWithFallback(): Promise<MediaStream> {
+    const constraints = [
+      // High quality - prefer rear camera
+      {
+        video: {
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 30, max: 60 },
+          facingMode: 'environment'
+        }
+      },
+      // Medium quality - any camera
+      {
+        video: {
+          width: { ideal: 960, max: 1280 },
+          height: { ideal: 540, max: 720 },
+          frameRate: { ideal: 24, max: 30 },
+          facingMode: { ideal: 'environment' }
+        }
+      },
+      // Basic quality
+      {
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 15 }
+        }
+      },
+      // Minimal constraints
+      { video: true }
+    ];
+    
+    for (let i = 0; i < constraints.length; i++) {
+      try {
+        console.log(`📷 Trying camera constraints set ${i + 1}/${constraints.length}`);
+        const stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
+        console.log(`✅ Camera constraints set ${i + 1} successful`);
+        return stream;
+      } catch (error) {
+        console.warn(`⚠️ Camera constraints set ${i + 1} failed:`, error);
+        if (i === constraints.length - 1) {
+          throw error; // Re-throw if all constraints failed
+        }
+      }
+    }
+    
+    throw new Error('All camera constraint sets failed');
+  }
+
+  // Set up video element with comprehensive error handling
+  async function setupVideoElement(stream: MediaStream): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!videoElement) {
+        reject(new Error('Video element not available'));
+        return;
+      }
       
-      // Enhanced video element handling
+      const setupTimeout = setTimeout(() => {
+        reject(new Error('Video setup timeout'));
+      }, 10000);
+      
       videoElement.onloadedmetadata = () => {
+        clearTimeout(setupTimeout);
+        
         console.log('📷 Video metadata loaded:', {
           width: videoElement.videoWidth,
           height: videoElement.videoHeight,
-          duration: videoElement.duration
+          duration: videoElement.duration,
+          readyState: videoElement.readyState
         });
-        videoElement.play().then(() => {
-          console.log('✅ Video playback started successfully');
-          // Additional validation
-          if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
-            setError('Invalid video dimensions. Please check your camera.');
-          }
-        }).catch(err => {
-          console.error('❌ Video playback failed:', err);
-          setError('Failed to start video playback.');
-        });
+        
+        // Validate video dimensions
+        if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+          reject(new Error('Invalid video dimensions received'));
+          return;
+        }
+        
+        videoElement.play()
+          .then(() => {
+            console.log('✅ Video playback started successfully');
+            setupCanvas();
+            startDetectionLoop();
+            resolve();
+          })
+          .catch(err => {
+            console.error('❌ Video playback failed:', err);
+            reject(new Error(`Video playback failed: ${err.message}`));
+          });
       };
       
       videoElement.onerror = (err) => {
+        clearTimeout(setupTimeout);
         console.error('❌ Video element error:', err);
-        setError('Video element error occurred.');
+        reject(new Error('Video element error occurred'));
       };
       
-      // Handle stream interruption with better logging
+      // Set up stream tracking
       stream.getVideoTracks()[0].onended = () => {
         console.warn('📷 Camera stream ended unexpectedly');
-        setError('Camera stream was interrupted. Please refresh or re-enable your camera.');
+        localError = 'Camera stream was interrupted. Please refresh or re-enable your camera.';
+        setError(localError);
+        localPermissionsGranted = false;
         permissionsGranted.set(false);
       };
       
-      // Monitor stream health
-      const videoTrack = stream.getVideoTracks()[0];
-      console.log('📷 Video track state:', videoTrack.readyState);
-      console.log('📷 Video track settings:', videoTrack.getSettings());
+      videoElement.srcObject = stream;
+    });
+  }
+
+  // Enhanced error handling with specific error types
+  function handleCameraError(error: any): string {
+    const errorName = error.name || '';
+    const errorMessage = error.message || error.toString();
+    
+    console.error('🔍 Camera error details:', {
+      name: errorName,
+      message: errorMessage,
+      constraint: error.constraint,
+      stack: error.stack
+    });
+    
+    switch (errorName) {
+      case 'NotAllowedError':
+        return 'Camera permission denied. Please allow camera access in your browser settings and refresh the page.';
       
-    } catch (err: any) {
-      console.error('❌ Camera initialization failed:', err);
-      console.error('Error details:', {
-        name: err.name,
-        message: err.message,
-        constraint: err.constraint,
-        stack: err.stack
-      });
+      case 'NotFoundError':
+        return 'No camera found. Please check if your device has a camera and it\'s properly connected.';
       
-      if (err && err.name === 'NotAllowedError') {
-        setError('Camera permission denied. Please allow camera access in your browser settings and refresh the page.');
-      } else if (err.name === 'NotFoundError') {
-        setError('No camera found. Please check if your device has a camera.');
-      } else if (err.name === 'NotReadableError') {
-        setError('Camera is already in use by another application. Please close other camera apps and try again.');
-      } else if (err.name === 'OverconstrainedError') {
-        console.warn('�� Camera constraints too restrictive, trying fallback...');
-        // Try with minimal constraints
-        try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
-          setCameraStream(fallbackStream);
-          videoElement.srcObject = fallbackStream;
-          videoElement.onloadedmetadata = () => videoElement.play();
-          console.log('✅ Fallback camera stream successful');
-        } catch (fallbackErr) {
-          setError('Camera does not support the required settings. Please try a different camera.');
+      case 'NotReadableError':
+        return 'Camera is currently in use by another application. Please close other camera apps and try again.';
+      
+      case 'OverconstrainedError':
+        return `Camera doesn't support the required settings. Constraint: ${error.constraint || 'unknown'}`;
+      
+      case 'SecurityError':
+        return 'Camera access blocked due to security restrictions. Please ensure you\'re using HTTPS or localhost.';
+      
+      case 'AbortError':
+        return 'Camera initialization was aborted. This may be due to browser security policies.';
+      
+      default:
+        if (errorMessage.includes('timeout')) {
+          return 'Camera initialization timed out. Please refresh the page and try again.';
         }
-      } else {
-        setError('Failed to access camera: ' + (err?.message || err));
-      }
-    } finally {
-      setLoadingState(false);
-      console.log('📷 Camera initialization process completed');
+        if (errorMessage.includes('not supported')) {
+          return 'Your browser or device doesn\'t support camera access. Please use Chrome, Firefox, Safari, or Edge.';
+        }
+        return `Camera error: ${errorMessage}`;
     }
   }
 
+  // Determine if camera error should trigger retry
+  function shouldRetryCamera(error: any): boolean {
+    const retryableErrors = [
+      'NotReadableError',  // Camera in use
+      'AbortError',        // Aborted initialization
+      'timeout',           // Timeout errors
+      'network'            // Network-related errors
+    ];
+    
+    const errorString = (error.name || error.message || '').toLowerCase();
+    return retryableErrors.some(retryable => errorString.includes(retryable.toLowerCase()));
+  }
+
+  // Canvas setup for detection visualization
   function setupCanvas() {
-    if (!isBrowser() || !videoElement) return;
+    if (!isBrowser() || !videoElement || !overlayCanvasElement) return;
     
-    const { videoWidth, videoHeight } = videoElement;
+    const video = videoElement;
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      console.warn('📷 Video dimensions not ready for canvas setup');
+      return;
+    }
     
-    // Set canvas sizes to match video
-    canvasElement.width = videoWidth;
-    canvasElement.height = videoHeight;
-    overlayCanvasElement.width = videoWidth;
-    overlayCanvasElement.height = videoHeight;
-
-    // Style canvases to fit container
-    const containerRect = videoElement.getBoundingClientRect();
-    overlayCanvasElement.style.position = 'absolute';
-    overlayCanvasElement.style.top = '0';
-    overlayCanvasElement.style.left = '0';
-    overlayCanvasElement.style.width = '100%';
-    overlayCanvasElement.style.height = '100%';
-    overlayCanvasElement.style.pointerEvents = 'none';
+    // Set canvas dimensions to match video
+    overlayCanvasElement.width = video.videoWidth;
+    overlayCanvasElement.height = video.videoHeight;
+    
+    if (canvasElement) {
+      canvasElement.width = video.videoWidth;
+      canvasElement.height = video.videoHeight;
+    }
+    
+    console.log('🎨 Canvas setup complete:', {
+      width: overlayCanvasElement.width,
+      height: overlayCanvasElement.height
+    });
   }
 
-  function checkLowLightAndResolution() {
-    if (!isBrowser() || !canvasElement) return;
-    
-    const ctx = canvasElement.getContext('2d');
-    if (!ctx) return;
-    const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
-    // Calculate average brightness
-    let total = 0;
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      total += 0.299 * imageData.data[i] + 0.587 * imageData.data[i+1] + 0.114 * imageData.data[i+2];
-    }
-    const avg = total / (imageData.data.length / 4);
-    if (avg < 40) {
-      setError('Low light detected. Please increase lighting for better detection.');
-    }
-    // Resolution check
-    if (canvasElement.width < 320 || canvasElement.height < 240) {
-      setError('Camera resolution too low for reliable detection.');
-    }
-    if (canvasElement.width > 1920 || canvasElement.height > 1080) {
-      setError('Camera resolution too high. Please lower resolution for better performance.');
-    }
-  }
-
+  // Detection loop with performance monitoring
   function startDetectionLoop() {
-    if (!isBrowser() || !detector || !classifier) return;
-
-    const detectFrame = async () => {
-      if (!isDetecting && videoElement && videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-        isDetecting = true;
-        const startTime = performance.now();
-
-        try {
-          // Capture frame from video
-          const ctx = canvasElement.getContext('2d')!;
-          ctx.drawImage(videoElement, 0, 0);
-          
-          // Get image data for detection
-          const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
-          
-          // Run detection
-          const detectedObjects = await detector!.detect(imageData);
-          
-          // Enhance detections with classification
-          const enhancedDetections = detectedObjects.map(detection => {
-            const classification = classifier!.classify(detection.class);
-            return {
-              ...detection,
-              category: classification?.category || detection.category,
-              confidence: Math.min(detection.confidence, classification?.confidence || detection.confidence)
-            };
-          });
-
-          // Update store
-          detections.set(enhancedDetections);
-          
-          // Draw detection boxes
-          drawDetections(enhancedDetections);
-          
-          const inferenceTime = performance.now() - startTime;
-          updatePerformanceMetric('inferenceTime', inferenceTime);
-          
-          // Calculate FPS
-          const now = performance.now();
+    if (!isBrowser() || isDetecting || !detector || !videoElement) return;
+    
+    isDetecting = true;
+    console.log('🔄 Starting detection loop...');
+    
+    function detectFrame() {
+      if (!isDetecting || !detector || !videoElement || !canvasElement) return;
+      
+      try {
+        const now = performance.now();
+        const deltaTime = now - lastFrameTime;
+        
+        // Maintain reasonable FPS (max 30 FPS to prevent overwhelming)
+        if (deltaTime > 33) { // ~30 FPS
+          lastFrameTime = now;
           frameCount++;
-          if (now - lastFrameTime >= 1000) {
-            updatePerformanceMetric('frameRate', frameCount);
-            frameCount = 0;
-            lastFrameTime = now;
+          
+          // Perform detection
+          const frameStartTime = performance.now();
+          performDetection();
+          const frameTime = performance.now() - frameStartTime;
+          
+          // Update performance metrics every 30 frames
+          if (frameCount % 30 === 0) {
+            const fps = 1000 / deltaTime;
+            updatePerformanceMetric('fps', fps);
+            updatePerformanceMetric('averageInferenceTime', frameTime);
           }
-
-          checkLowLightAndResolution();
-
-        } catch (error) {
-          console.error('Detection error:', error);
-        } finally {
-          isDetecting = false;
         }
-      }
-
-      if (isBrowser()) {
+        
+        animationId = requestAnimationFrame(detectFrame);
+      } catch (error) {
+        console.error('❌ Detection loop error:', error);
+        // Continue loop despite errors
         animationId = requestAnimationFrame(detectFrame);
       }
-    };
-
-    detectFrame();
+    }
+    
+    animationId = requestAnimationFrame(detectFrame);
   }
 
-  function drawDetections(detectedObjects: Detection[]) {
-    if (!isBrowser() || !overlayCanvasElement) return;
+  // Perform object detection on current frame
+  async function performDetection() {
+    if (!detector || !videoElement || !canvasElement || !overlayCanvasElement) return;
     
-    const ctx = overlayCanvasElement.getContext('2d')!;
-    ctx.clearRect(0, 0, overlayCanvasElement.width, overlayCanvasElement.height);
+    try {
+      // Draw current video frame to canvas
+      const ctx = canvasElement.getContext('2d');
+      if (!ctx) return;
+      
+      ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+      
+      // Get image data for detection
+      const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+      
+      // Run detection
+      const detectedObjects = await detector.detect(imageData);
+      
+      // Update detections store
+      detections.set(detectedObjects);
+      
+      // Draw detection results
+      drawDetections(detectedObjects);
+      
+    } catch (error) {
+      console.error('❌ Detection error:', error);
+    }
+  }
 
+  // Draw detection bounding boxes and labels
+  function drawDetections(detectedObjects: Detection[]) {
+    if (!overlayCanvasElement) return;
+    
+    const ctx = overlayCanvasElement.getContext('2d');
+    if (!ctx) return;
+    
+    // Clear previous drawings
+    ctx.clearRect(0, 0, overlayCanvasElement.width, overlayCanvasElement.height);
+    
+    // Draw each detection
     detectedObjects.forEach((detection, index) => {
       const [x, y, width, height] = detection.bbox;
+      const confidence = detection.confidence;
       const category = detection.category;
       
-      // Set colors based on category
-      let color = '#ef4444'; // red for landfill
-      if (category === 'recycle') color = '#22c55e'; // green
-      if (category === 'compost') color = '#84cc16'; // lime
-
+      // Color coding by category
+      const colors = {
+        recycle: '#22c55e',    // Green
+        compost: '#f59e0b',    // Orange  
+        trash: '#ef4444',      // Red
+        hazardous: '#8b5cf6'   // Purple
+      };
+      
+      const color = colors[category as keyof typeof colors] || '#6b7280';
+      
       // Draw bounding box
       ctx.strokeStyle = color;
       ctx.lineWidth = 3;
-      ctx.setLineDash([]);
       ctx.strokeRect(x, y, width, height);
-
-      // Draw filled background for label
+      
+      // Draw background for label
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.2;
-      ctx.fillRect(x, y, width, height);
-      ctx.globalAlpha = 1;
-
-      // Draw label background
-      const label = `${detection.class} (${(detection.confidence * 100).toFixed(0)}%)`;
-      ctx.font = '14px Inter, sans-serif';
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-      const textMetrics = ctx.measureText(label);
-      const labelHeight = 24;
-      ctx.fillRect(x, y - labelHeight, textMetrics.width + 16, labelHeight);
-
+      ctx.fillRect(x, y - 30, width, 30);
+      
       // Draw label text
-      ctx.fillStyle = 'white';
-      ctx.fillText(label, x + 8, y - 6);
-
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px Inter, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(
+        `${detection.label} (${Math.round(confidence * 100)}%)`,
+        x + 8,
+        y - 8
+      );
+      
       // Draw category icon
       ctx.font = '16px Inter, sans-serif';
       const icon = category === 'recycle' ? '♻️' : category === 'compost' ? '🌱' : '🗑️';
@@ -354,6 +553,7 @@
     });
   }
 
+  // Handle canvas clicks for detection selection
   function handleCanvasClick(event: MouseEvent) {
     if (!isBrowser() || !overlayCanvasElement) return;
     
@@ -372,20 +572,11 @@
 
     if (clickedDetection) {
       selectedDetection.set(clickedDetection);
+      console.log('👆 Detection selected:', clickedDetection.label);
     }
   }
 
-  function cleanup() {
-    if (isBrowser() && animationId) {
-      cancelAnimationFrame(animationId);
-    }
-    if (detector) {
-      detector.dispose();
-    }
-    stopCamera();
-  }
-
-  // Handle window resize
+  // Window resize handler
   function handleResize() {
     if (!isBrowser()) return;
     
@@ -394,20 +585,24 @@
     }
   }
 
-  // Start detection loop when video loads
+  // Video load handler  
   function handleVideoLoad() {
     if (!isBrowser()) return;
     
     setupCanvas();
-    startDetectionLoop();
+    if (!isDetecting) {
+      startDetectionLoop();
+    }
   }
 
-  // Enhanced camera permission request
+  // User-initiated camera permission request
   async function requestCameraPermission() {
     if (!isBrowser()) return;
     
-    console.log('📷 User requested camera permission');
-    setError(null); // Clear any previous errors
+    console.log('👤 User requested camera permission');
+    localError = null;
+    setError(null);
+    initializationAttempts = 0; // Reset retry count for user-initiated request
     await startCamera();
   }
 
@@ -415,32 +610,48 @@
   async function retryCamera() {
     if (!isBrowser()) return;
     
-    console.log('📷 Retrying camera initialization');
+    console.log('🔄 User triggered camera retry');
+    localError = null;
     setError(null);
+    localPermissionsGranted = false;
     permissionsGranted.set(false);
+    initializationAttempts = 0; // Reset retry count
     await startCamera();
   }
 
-  // Auto-start camera if permissions were previously granted
+  // Check existing camera permissions
   async function checkExistingPermissions() {
-    if (!isBrowser() || !navigator.permissions) return;
+    if (!isBrowser()) return;
+    
+    const navigator = safeNavigator();
+    if (!navigator?.permissions) {
+      console.warn('📷 Permissions API not supported, showing permission UI');
+      return;
+    }
     
     try {
       const permissionStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
-      console.log('📷 Existing camera permission:', permissionStatus.state);
+      console.log('📷 Existing camera permission status:', permissionStatus.state);
       
       if (permissionStatus.state === 'granted') {
-        console.log('📷 Camera permission already granted, auto-starting...');
+        console.log('📷 Camera permission already granted, auto-starting camera...');
         await startCamera();
+      } else if (permissionStatus.state === 'denied') {
+        localError = 'Camera permission was previously denied. Please enable camera access in your browser settings.';
+        setError(localError);
       }
       
       // Listen for permission changes
       permissionStatus.addEventListener('change', () => {
         console.log('📷 Camera permission changed to:', permissionStatus.state);
-        if (permissionStatus.state === 'granted' && !$permissionsGranted) {
+        if (permissionStatus.state === 'granted' && !browserPermissionsGranted) {
+          console.log('📷 Permission granted, starting camera...');
           startCamera();
         } else if (permissionStatus.state === 'denied') {
-          setError('Camera permission was denied. Please enable camera access in your browser settings.');
+          const errorMsg = 'Camera permission was denied. Please enable camera access in your browser settings.';
+          localError = errorMsg;
+          setError(errorMsg);
+          localPermissionsGranted = false;
           permissionsGranted.set(false);
         }
       });
@@ -448,6 +659,35 @@
       console.warn('📷 Could not check existing camera permissions:', error);
       // Fallback: just show the permission request UI
     }
+  }
+
+  // Component cleanup
+  function cleanup() {
+    if (!isBrowser()) return;
+    
+    console.log('🧹 Cleaning up CameraView...');
+    
+    // Stop detection loop
+    isDetecting = false;
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+    }
+    
+    // Dispose ML models
+    if (detector) {
+      detector.dispose();
+      detector = null;
+    }
+    
+    if (classifier) {
+      // Dispose classifier if it has dispose method
+      classifier = null;
+    }
+    
+    // Stop camera
+    stopCamera();
+    
+    console.log('✅ CameraView cleanup complete');
   }
 </script>
 
@@ -474,16 +714,32 @@
     class="absolute inset-0 cursor-pointer"
   />
 
-  <!-- Loading overlay with enhanced UX -->
-  {#if !$permissionsGranted}
-    <div class="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
+  <!-- Loading and Permission UI -->
+  {#if !browserPermissionsGranted}
+    <div class="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
       <div class="text-center text-white p-6 max-w-sm">
-        {#if $isLoading}
-          <div class="loading-spinner w-16 h-16 mx-auto mb-6"></div>
-          <p class="text-xl font-medium mb-2">Starting camera...</p>
-          <p class="text-sm opacity-75">Please wait while we initialize your camera</p>
+        {#if browserIsLoading}
+          <!-- Loading State -->
+          <div class="loading-spinner w-16 h-16 mx-auto mb-6 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div>
+          <p class="text-xl font-medium mb-2">
+            {#if $loadingState.stage === 'models'}
+              Loading AI Models...
+            {:else if $loadingState.stage === 'camera'}
+              Starting Camera...
+            {:else}
+              Initializing...
+            {/if}
+          </p>
+          <p class="text-sm opacity-75">
+            {$loadingState.message || 'Please wait while we set up EcoScan'}
+          </p>
+          {#if $loadingState.progress > 0}
+            <div class="w-full bg-gray-700 rounded-full h-2 mt-4">
+              <div class="bg-green-500 h-2 rounded-full transition-all duration-300" style="width: {$loadingState.progress}%"></div>
+            </div>
+          {/if}
         {:else}
-          <!-- Permission request UI -->
+          <!-- Permission Request UI -->
           <div class="mb-6">
             <div class="w-16 h-16 mx-auto mb-4 bg-green-500 rounded-full flex items-center justify-center">
               <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -493,14 +749,14 @@
             <h3 class="text-xl font-semibold mb-2">Camera Access Required</h3>
             <p class="text-sm opacity-90 leading-relaxed">
               EcoScan needs camera access to detect and classify waste items in real-time. 
-              Your privacy is protected - images are processed locally and never uploaded.
+              Your privacy is protected - all processing happens locally on your device.
             </p>
           </div>
           
           <button 
-            class="btn btn-primary btn-lg w-full mb-4"
+            class="btn btn-primary btn-lg w-full mb-4 bg-green-500 hover:bg-green-600 border-green-500"
             on:click={requestCameraPermission}
-            disabled={$isLoading}
+            disabled={browserIsLoading}
           >
             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
@@ -509,13 +765,14 @@
           </button>
           
           <div class="text-xs opacity-70 space-y-1">
-            <p>• Real-time waste detection</p>
-            <p>• Completely private & secure</p>
-            <p>• No data leaves your device</p>
+            <p>• Real-time waste detection & classification</p>
+            <p>• 100% private - no data leaves your device</p>
+            <p>• Works offline after initial load</p>
           </div>
         {/if}
         
-        {#if $error}
+        <!-- Error Display -->
+        {#if browserError}
           <div class="mt-4 p-4 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg text-sm">
             <div class="flex items-start space-x-3">
               <div class="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5">
@@ -525,27 +782,31 @@
               </div>
               <div class="flex-1">
                 <p class="font-medium text-red-200">Camera Access Failed</p>
-                <p class="mt-1 text-red-300">{$error}</p>
+                <p class="mt-1 text-red-300">{browserError}</p>
                 
                 <div class="mt-4 space-y-3">
                   <button 
-                    class="btn btn-sm btn-error w-full"
+                    class="btn btn-sm btn-error w-full bg-red-500 hover:bg-red-600"
                     on:click={retryCamera}
+                    disabled={browserIsLoading}
                   >
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
                     Try Again
+                    {#if initializationAttempts > 0}
+                      ({initializationAttempts}/{maxRetryAttempts})
+                    {/if}
                   </button>
                   
                   <!-- Alternative options -->
                   <div class="border-t border-red-400 pt-3">
                     <p class="text-xs text-red-300 mb-2">Alternative options:</p>
                     <div class="grid grid-cols-2 gap-2">
-                      <a href="/upload" class="btn btn-xs btn-outline btn-error">
+                      <a href="/upload" class="btn btn-xs btn-outline btn-error text-red-300 border-red-400 hover:bg-red-500 hover:text-white">
                         📤 Upload Image
                       </a>
-                      <a href="/voice" class="btn btn-xs btn-outline btn-error">
+                      <a href="/voice" class="btn btn-xs btn-outline btn-error text-red-300 border-red-400 hover:bg-red-500 hover:text-white">
                         🎤 Voice Input
                       </a>
                     </div>
@@ -574,24 +835,70 @@
   {/if}
 
   <!-- Detection count indicator -->
-  {#if $detections.length > 0}
+  {#if $detections.length > 0 && browserPermissionsGranted}
     <div class="absolute top-4 left-4 bg-black bg-opacity-70 text-white px-3 py-2 rounded-lg">
       <span class="font-medium">{$detections.length} item{$detections.length !== 1 ? 's' : ''} detected</span>
     </div>
   {/if}
 
   <!-- Instructions overlay -->
-  <div class="absolute bottom-4 left-4 right-4 bg-black bg-opacity-70 text-white p-4 rounded-lg">
-    <p class="text-sm">
-      🎯 Point your camera at waste items to classify them.<br>
-      📱 Tap on detected objects for disposal instructions.
-    </p>
-  </div>
+  {#if browserPermissionsGranted && !browserIsLoading}
+    <div class="absolute bottom-4 left-4 right-4 bg-black bg-opacity-70 text-white p-4 rounded-lg">
+      <p class="text-sm">
+        🎯 Point your camera at waste items to classify them.<br>
+        📱 Tap on detected objects for disposal instructions.
+      </p>
+    </div>
+  {/if}
 </div>
 
 <style>
-  /* Ensure video maintains aspect ratio */
+  .loading-spinner {
+    border: 4px solid #374151;
+    border-top: 4px solid #22c55e;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
   video {
     object-fit: cover;
   }
+  
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md transition-colors duration-200;
+  }
+  
+  .btn-primary {
+    @apply text-white bg-green-500 hover:bg-green-600;
+  }
+  
+  .btn-error {
+    @apply text-white bg-red-500 hover:bg-red-600;
+  }
+  
+  .btn-outline {
+    @apply bg-transparent border-current;
+  }
+  
+  .btn-lg {
+    @apply px-6 py-3 text-base;
+  }
+  
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+  
+  .btn-xs {
+    @apply px-2 py-1 text-xs;
+  }
+  
+  .btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+</style> 
 </style> 
