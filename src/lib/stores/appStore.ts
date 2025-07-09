@@ -215,6 +215,16 @@ export const setCameraStream = (stream: MediaStream | null) => {
     }
     return stream;
   });
+  
+  // Update permission and active state based on stream availability
+  if (stream) {
+    permissionsGranted.set(true);
+    isCameraActive.set(true);
+    console.log('📷 Camera stream set successfully, permissions granted');
+  } else {
+    permissionsGranted.set(false);
+    isCameraActive.set(false);
+  }
 };
 
 export const stopCamera = () => {
