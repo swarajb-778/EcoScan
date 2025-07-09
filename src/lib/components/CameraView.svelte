@@ -19,6 +19,7 @@
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
+  import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
 
   // Component state
   let videoElement: HTMLVideoElement;
@@ -52,7 +53,7 @@
   $: browserError = isBrowser() ? $error : localError;
   $: browserPermissionsGranted = isBrowser() ? $permissionsGranted : localPermissionsGranted;
 
-  // Component lifecycle
+  // Component lifecycle with performance monitoring
   onMount(async () => {
     if (!isBrowser()) {
       console.warn('🚫 CameraView: Skipping initialization during SSR');
@@ -60,7 +61,10 @@
     }
     
     mountStartTime = performance.now();
-    console.log('🎬 CameraView: Starting component initialization...');
+    console.log('🎬 CameraView: Starting component initialization with performance tracking...');
+    
+    // Initialize performance monitoring
+    perf.start('componentMount');
     
     try {
       // Initialize ML models first
@@ -69,30 +73,52 @@
       // Check existing permissions and potentially auto-start camera
       await checkExistingPermissions();
       
-      const mountTime = performance.now() - mountStartTime;
+      const mountTime = perf.end('componentMount', 'ui');
       console.log(`✅ CameraView: Component initialized in ${mountTime.toFixed(0)}ms`);
+      
+      // Update both new and legacy performance metrics
       updatePerformanceMetric('componentMountTime', mountTime);
+      
+      // Generate initial performance snapshot
+      const snapshot = perf.snapshot();
+      console.log('📊 Initial performance snapshot:', snapshot.summary);
+      
     } catch (error) {
       console.error('❌ CameraView: Initialization failed:', error);
+      perf.end('componentMount', 'ui');
+      perf.record('componentMountFailed', 1, 'count', 'ui');
       setError(`Component initialization failed: ${error}`);
     }
   });
 
   onDestroy(() => {
-    console.log('🧹 CameraView: Cleaning up component...');
+    console.log('🧹 CameraView: Cleaning up component with performance monitoring...');
+    
+    // Record component lifetime
+    if (mountStartTime > 0) {
+      const lifetime = performance.now() - mountStartTime;
+      perf.record('componentLifetime', lifetime, 'ms', 'ui');
+    }
+    
     cleanup();
+    
+    // Stop performance monitoring
+    getPerformanceMonitor().stop();
   });
 
-  // Initialize ML models with comprehensive error handling
+  // Initialize ML models with comprehensive performance tracking
   async function initializeML() {
     if (!isBrowser()) return;
     
-    console.log('🤖 Initializing ML models...');
+    console.log('🤖 Initializing ML models with performance tracking...');
     localIsLoading = true;
     setLoadingState(true, 'models', 0, 'Loading AI models...');
     
+    // Start overall ML initialization timer
+    perf.start('mlInitialization');
+    
     try {
-      // Initialize models with timeout protection
+      // Initialize models with timeout protection and individual tracking
       const initPromise = Promise.all([
         initializeDetector(),
         initializeClassifier()
@@ -103,17 +129,25 @@
         setTimeout(() => reject(new Error('Model loading timeout (30s)')), 30000);
       });
       
-      const startTime = performance.now();
       await Promise.race([initPromise, timeoutPromise]);
-      const loadTime = performance.now() - startTime;
       
-      updatePerformanceMetric('modelLoadTime', loadTime);
-      console.log(`🚀 ML models loaded in ${loadTime.toFixed(0)}ms`);
+      // Record successful initialization
+      const totalTime = perf.end('mlInitialization', 'ml');
+      console.log(`🚀 ML models loaded in ${totalTime.toFixed(0)}ms`);
+      
+      // Update legacy performance metric for compatibility
+      updatePerformanceMetric('modelLoadTime', totalTime);
+      
       setSuccess('AI models loaded successfully');
       
     } catch (error) {
       const errorMessage = `Failed to load AI models: ${error}`;
       console.error('❌ ML initialization error:', error);
+      
+      // Record failed initialization
+      perf.end('mlInitialization', 'ml');
+      perf.record('mlInitializationFailed', 1, 'count', 'ml');
+      
       localError = errorMessage;
       setError(errorMessage);
       throw error;
@@ -125,21 +159,31 @@
 
   async function initializeDetector(): Promise<void> {
     console.log('🔍 Loading object detector...');
+    perf.start('detectorInitialization');
+    
     detector = new ObjectDetector(modelConfig);
     setLoadingState(true, 'detector', 25, 'Loading object detector...');
+    
     await detector.initialize();
-    console.log('✅ Object detector ready');
+    
+    const detectorTime = perf.end('detectorInitialization', 'ml');
+    console.log(`✅ Object detector ready in ${detectorTime.toFixed(0)}ms`);
   }
 
   async function initializeClassifier(): Promise<void> {
-    console.log('🏷️ Loading waste classifier...');  
+    console.log('🏷️ Loading waste classifier...');
+    perf.start('classifierInitialization');
+    
     classifier = new WasteClassifier();
     setLoadingState(true, 'classifier', 75, 'Loading waste classifier...');
+    
     await classifier.initialize();
-    console.log('✅ Waste classifier ready');
+    
+    const classifierTime = perf.end('classifierInitialization', 'ml');
+    console.log(`✅ Waste classifier ready in ${classifierTime.toFixed(0)}ms`);
   }
 
-  // Enhanced camera initialization with robust error handling
+  // Enhanced camera initialization with comprehensive performance tracking
   async function startCamera() {
     if (!isBrowser()) {
       console.warn('🚫 Camera: Cannot start camera during SSR');
@@ -147,7 +191,10 @@
     }
     
     initializationAttempts++;
-    console.log(`📷 Camera: Starting initialization (attempt ${initializationAttempts}/${maxRetryAttempts})...`);
+    console.log(`📷 Camera: Starting initialization with performance tracking (attempt ${initializationAttempts}/${maxRetryAttempts})...`);
+    
+    // Start performance tracking
+    perf.start('cameraInitialization');
     
     localIsLoading = true;
     localError = null;
@@ -155,6 +202,20 @@
     setError(null);
     
     try {
+      // Track compatibility check time
+      perf.start('compatibilityCheck');
+      const compatibility = checkCameraCompatibility();
+      perf.end('compatibilityCheck', 'camera');
+      
+      console.log('📊 Camera compatibility analysis:', {
+        score: compatibility.score,
+        issues: compatibility.issues.length,
+        warnings: compatibility.warnings.length
+      });
+      
+      // Record compatibility score
+      perf.record('cameraCompatibilityScore', compatibility.score, 'score', 'camera');
+      
       // Comprehensive browser support check
       if (!isUserMediaSupported()) {
         throw new Error('Camera access is not supported in this browser. Please use Chrome, Firefox, Safari, or Edge.');
@@ -165,31 +226,41 @@
         throw new Error('Media devices API not available. Please ensure you\'re using HTTPS or localhost.');
       }
       
-      // Check available devices
+      // Check available devices with timing
       console.log('📷 Camera: Checking available devices...');
       setLoadingState(true, 'camera', 25, 'Checking camera devices...');
       
+      perf.start('deviceEnumeration');
       const devices = await navigator.mediaDevices.enumerateDevices();
+      const enumerationTime = perf.end('deviceEnumeration', 'camera');
+      
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
       
       console.log('📷 Camera devices found:', {
         total: devices.length,
         videoInputs: videoInputs.length,
+        enumerationTime: `${enumerationTime.toFixed(0)}ms`,
         devices: videoInputs.map(d => ({
           deviceId: d.deviceId.substring(0, 8) + '...',
           label: d.label || 'Unknown Device'
         }))
       });
       
+      // Record device information
+      perf.record('cameraDeviceCount', videoInputs.length, 'count', 'camera');
+      perf.record('deviceEnumerationTime', enumerationTime, 'ms', 'camera');
+      
       if (videoInputs.length === 0) {
         throw new Error('No camera device found. Please connect a camera and refresh the page.');
       }
       
-      // Request camera stream with progressive constraints
+      // Request camera stream with performance tracking
       console.log('📷 Camera: Requesting camera stream...');
       setLoadingState(true, 'camera', 50, 'Requesting camera access...');
       
+      perf.start('streamAcquisition');
       const stream = await getUserMediaWithFallback();
+      const streamTime = perf.end('streamAcquisition', 'camera');
       
       // Validate stream
       if (!stream || stream.getVideoTracks().length === 0) {
@@ -202,18 +273,40 @@
         active: stream.active,
         tracks: stream.getTracks().length,
         videoTracks: stream.getVideoTracks().length,
+        streamAcquisitionTime: `${streamTime.toFixed(0)}ms`,
         settings: stream.getVideoTracks()[0]?.getSettings()
       });
       
-      // Set up video element
+      // Record stream acquisition metrics
+      perf.record('streamAcquisitionTime', streamTime, 'ms', 'camera');
+      
+      // Set up video element with timing
       setLoadingState(true, 'camera', 75, 'Setting up video stream...');
+      perf.start('videoSetup');
       await setupVideoElement(stream);
+      const setupTime = perf.end('videoSetup', 'camera');
       
       // Update stores
       setCameraStream(stream);
       localPermissionsGranted = true;
       
+      // Record total initialization time
+      const totalTime = perf.end('cameraInitialization', 'camera');
+      
       console.log('✅ Camera: Successfully initialized and ready');
+      console.log('📊 Camera initialization performance:', {
+        total: `${totalTime.toFixed(0)}ms`,
+        streamAcquisition: `${streamTime.toFixed(0)}ms`,
+        videoSetup: `${setupTime.toFixed(0)}ms`,
+        deviceEnumeration: `${enumerationTime.toFixed(0)}ms`
+      });
+      
+      // Update legacy performance metric for compatibility
+      updatePerformanceMetric('cameraInitTime', totalTime);
+      
+      // Start monitoring camera stream health
+      perf.camera(stream);
+      
       setSuccess('Camera initialized successfully');
       
       // Reset retry attempts on success
@@ -221,6 +314,11 @@
       
     } catch (error: any) {
       console.error('❌ Camera: Initialization failed:', error);
+      
+      // Record failed initialization
+      const failedTime = perf.end('cameraInitialization', 'camera');
+      perf.record('cameraInitializationFailed', 1, 'count', 'camera');
+      perf.record('cameraFailureAttempt', initializationAttempts, 'count', 'camera');
       
       const errorMessage = handleCameraError(error);
       localError = errorMessage;
@@ -563,12 +661,12 @@
     });
   }
 
-  // Detection loop with performance monitoring
+  // Detection loop with comprehensive performance monitoring
   function startDetectionLoop() {
     if (!isBrowser() || isDetecting || !detector || !videoElement) return;
     
     isDetecting = true;
-    console.log('🔄 Starting detection loop...');
+    console.log('🔄 Starting detection loop with performance monitoring...');
     
     function detectFrame() {
       if (!isDetecting || !detector || !videoElement || !canvasElement) return;
@@ -582,22 +680,31 @@
           lastFrameTime = now;
           frameCount++;
           
-          // Perform detection
-          const frameStartTime = performance.now();
+          // Record frame for FPS calculation
+          perf.frame();
+          
+          // Perform detection with timing
+          perf.start('frameDetection');
           performDetection();
-          const frameTime = performance.now() - frameStartTime;
           
           // Update performance metrics every 30 frames
           if (frameCount % 30 === 0) {
             const fps = 1000 / deltaTime;
+            // Legacy compatibility
             updatePerformanceMetric('fps', fps);
-            updatePerformanceMetric('averageInferenceTime', frameTime);
+            
+            // Get current performance report
+            const report = perf.report();
+            if (report.issues.length > 0) {
+              console.warn('⚠️ Performance issues detected:', report.issues);
+            }
           }
         }
         
         animationId = requestAnimationFrame(detectFrame);
       } catch (error) {
         console.error('❌ Detection loop error:', error);
+        perf.record('detectionLoopError', 1, 'count', 'ml');
         // Continue loop despite errors
         animationId = requestAnimationFrame(detectFrame);
       }
@@ -606,31 +713,65 @@
     animationId = requestAnimationFrame(detectFrame);
   }
 
-  // Perform object detection on current frame
+  // Perform object detection with comprehensive performance tracking
   async function performDetection() {
     if (!detector || !videoElement || !canvasElement || !overlayCanvasElement) return;
     
     try {
-      // Draw current video frame to canvas
+      // Draw current video frame to canvas with timing
+      perf.start('canvasDrawing');
       const ctx = canvasElement.getContext('2d');
       if (!ctx) return;
       
       ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+      const drawTime = perf.end('canvasDrawing', 'ui');
       
       // Get image data for detection
+      perf.start('imageDataExtraction');
       const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+      perf.end('imageDataExtraction', 'ui');
       
-      // Run detection
+      // Run detection with comprehensive timing
+      perf.start('objectDetection');
       const detectedObjects = await detector.detect(imageData);
+      const detectionTime = perf.end('objectDetection', 'ml');
+      
+      // Record inference time using performance monitor
+      perf.inference(detectionTime);
       
       // Update detections store
       detections.set(detectedObjects);
       
-      // Draw detection results
+      // Draw detection results with timing
+      perf.start('resultRendering');
       drawDetections(detectedObjects);
+      const renderTime = perf.end('resultRendering', 'ui');
+      
+      // Log detailed performance every 100 frames for debugging
+      if (frameCount % 100 === 0) {
+        console.log('📊 Detection performance breakdown:', {
+          total: `${(detectionTime + drawTime + renderTime).toFixed(1)}ms`,
+          inference: `${detectionTime.toFixed(1)}ms`,
+          canvasDrawing: `${drawTime.toFixed(1)}ms`,
+          resultRendering: `${renderTime.toFixed(1)}ms`,
+          detectedObjects: detectedObjects.length,
+          frameCount: frameCount
+        });
+      }
+      
+      // Record detection results
+      perf.record('detectedObjectCount', detectedObjects.length, 'count', 'ml');
+      perf.record('totalDetectionTime', detectionTime + drawTime + renderTime, 'ms', 'ml');
+      
+      // Update legacy performance metric for compatibility
+      updatePerformanceMetric('averageInferenceTime', detectionTime);
       
     } catch (error) {
       console.error('❌ Detection error:', error);
+      perf.record('detectionError', 1, 'count', 'ml');
+      
+      // End any pending timers
+      perf.end('frameDetection', 'ml');
     }
   }
 
