@@ -10,6 +10,7 @@
     updatePerformanceMetric
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
+  import { isBrowser } from '$lib/utils/browser.js';
 
   let fileInput: HTMLInputElement;
   let previewImage: HTMLImageElement;
@@ -21,6 +22,8 @@
   let dragActive = false;
   let uploadedFile: File | null = null;
   let currentDetections: Detection[] = [];
+  let mounted = false;
+  let uploadProgress = 0;
 
   const modelConfig: ModelConfig = {
     modelPath: '/models/yolov8n.onnx',
@@ -29,11 +32,24 @@
     iouThreshold: 0.4
   };
 
+  // Enhanced file validation
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const SUPPORTED_FORMATS = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
+  const MAX_BATCH_SIZE = 5;
+
   onMount(async () => {
+    if (!isBrowser()) {
+      console.warn('ImageUpload skipping initialization during SSR');
+      return;
+    }
+    
+    mounted = true;
     await initializeML();
   });
 
   async function initializeML() {
+    if (!mounted) return;
+    
     setLoadingState(true);
     try {
       detector = new ObjectDetector(modelConfig);
@@ -79,66 +95,121 @@
     }
   }
 
-  function handleFile(file: File) {
-    // Validate file type
+  function validateFile(file: File): { valid: boolean; error?: string } {
+    // Check file type
     if (!file.type.startsWith('image/')) {
-      setError('Please select a valid image file.');
-      return;
+      return { valid: false, error: 'Please select a valid image file.' };
     }
-    // Check file size (limit to 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Image file too large. Please select a file under 10MB.');
-      return;
+
+    // Check file size
+    if (file.size > MAX_FILE_SIZE) {
+      return { valid: false, error: 'Image file too large. Please select a file under 10MB.' };
     }
+
     // Check for supported formats
-    const supportedFormats = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
-    if (!supportedFormats.includes(file.type)) {
-      setError('Unsupported image format. Please use JPG, PNG, WebP, GIF, or BMP.');
+    if (!SUPPORTED_FORMATS.includes(file.type)) {
+      return { valid: false, error: 'Unsupported image format. Please use JPG, PNG, WebP, GIF, or BMP.' };
+    }
+
+    // Check for potential security issues
+    if (file.name.length > 255) {
+      return { valid: false, error: 'Filename too long.' };
+    }
+
+    // Check for suspicious file extensions
+    const suspiciousExtensions = ['.exe', '.js', '.html', '.php', '.asp'];
+    const fileName = file.name.toLowerCase();
+    if (suspiciousExtensions.some(ext => fileName.includes(ext))) {
+      return { valid: false, error: 'File appears to be invalid or potentially unsafe.' };
+    }
+
+    return { valid: true };
+  }
+
+  function handleFile(file: File) {
+    const validation = validateFile(file);
+    if (!validation.valid) {
+      setError(validation.error!);
       return;
     }
+
+    uploadedFile = file;
+    uploadProgress = 0;
+    
+    // Simulate upload progress for better UX
+    const progressInterval = setInterval(() => {
+      uploadProgress += 10;
+      if (uploadProgress >= 90) {
+        clearInterval(progressInterval);
+      }
+    }, 50);
+
     // Try to load image
     const reader = new FileReader();
-    reader.onerror = () => setError('Failed to read image file. The file may be corrupt.');
+    reader.onerror = () => {
+      clearInterval(progressInterval);
+      setError('Failed to read image file. The file may be corrupt.');
+      uploadProgress = 0;
+    };
+    
     reader.onload = (e) => {
+      clearInterval(progressInterval);
+      uploadProgress = 100;
+      
       const imageSrc = e.target?.result as string;
       previewImage.src = imageSrc;
+      
       previewImage.onload = () => {
-        // Warn for extreme aspect ratios
-        if (previewImage.naturalWidth / previewImage.naturalHeight > 4 || previewImage.naturalHeight / previewImage.naturalWidth > 4) {
-          setError('Image aspect ratio is extreme. Detection may be unreliable.');
+        // Validate image dimensions and aspect ratio
+        const { naturalWidth, naturalHeight } = previewImage;
+        
+        if (naturalWidth < 64 || naturalHeight < 64) {
+          setError('Image resolution too low. Minimum 64x64 pixels required.');
+          return;
         }
+        
+        if (naturalWidth > 8192 || naturalHeight > 8192) {
+          setError('Image resolution too high. Maximum 8192x8192 pixels supported.');
+          return;
+        }
+        
+        // Warn for extreme aspect ratios
+        const aspectRatio = naturalWidth / naturalHeight;
+        if (aspectRatio > 4 || aspectRatio < 0.25) {
+          console.warn('Extreme aspect ratio detected. Detection may be less reliable.');
+        }
+        
         setupCanvas();
         processImage();
       };
-      previewImage.onerror = () => setError('Failed to load image. The file may be corrupt or unsupported.');
+      
+      previewImage.onerror = () => {
+        setError('Failed to load image. The file may be corrupt or unsupported.');
+        uploadProgress = 0;
+      };
     };
+    
     reader.readAsDataURL(file);
   }
 
   function handleFiles(files: FileList) {
-    if (files.length > 5) {
-      setError('Batch upload limit exceeded. Please select up to 5 images.');
+    if (files.length > MAX_BATCH_SIZE) {
+      setError(`Batch upload limit exceeded. Please select up to ${MAX_BATCH_SIZE} images.`);
       return;
     }
-    for (let i = 0; i < files.length; i++) {
-      handleFile(files[i]);
+    
+    // For now, handle only the first file
+    // Future enhancement: support batch processing
+    if (files.length > 1) {
+      console.warn('Multiple files selected. Processing first file only.');
     }
-  }
-
-  function displayImage(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const imageSrc = e.target?.result as string;
-      previewImage.src = imageSrc;
-      previewImage.onload = () => {
-        setupCanvas();
-        processImage();
-      };
-    };
-    reader.readAsDataURL(file);
+    
+    handleFile(files[0]);
   }
 
   function setupCanvas() {
+    if (!mounted || !previewImage) return;
+    
     const { naturalWidth, naturalHeight } = previewImage;
     
     // Set canvas sizes to match image
@@ -148,7 +219,6 @@
     overlayCanvasElement.height = naturalHeight;
 
     // Style overlay canvas to match preview image
-    const imageRect = previewImage.getBoundingClientRect();
     overlayCanvasElement.style.position = 'absolute';
     overlayCanvasElement.style.top = '0';
     overlayCanvasElement.style.left = '0';
@@ -158,7 +228,7 @@
   }
 
   async function processImage() {
-    if (!detector || !classifier || !previewImage) {
+    if (!detector || !classifier || !previewImage || !mounted) {
       return;
     }
 
@@ -206,10 +276,12 @@
   }
 
   function drawDetections(detectedObjects: Detection[]) {
+    if (!mounted || !overlayCanvasElement) return;
+    
     const ctx = overlayCanvasElement.getContext('2d')!;
     ctx.clearRect(0, 0, overlayCanvasElement.width, overlayCanvasElement.height);
 
-    detectedObjects.forEach((detection) => {
+    detectedObjects.forEach((detection, index) => {
       const [x, y, width, height] = detection.bbox;
       const category = detection.category;
       
@@ -232,10 +304,10 @@
 
       // Draw label background
       const label = `${detection.class} (${(detection.confidence * 100).toFixed(0)}%)`;
-      ctx.font = '16px Inter, sans-serif';
+      ctx.font = '14px Inter, sans-serif';
       ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
       const textMetrics = ctx.measureText(label);
-      const labelHeight = 28;
+      const labelHeight = 24;
       ctx.fillRect(x, y - labelHeight, textMetrics.width + 16, labelHeight);
 
       // Draw label text
@@ -243,13 +315,15 @@
       ctx.fillText(label, x + 8, y - 6);
 
       // Draw category icon
-      ctx.font = '20px Inter, sans-serif';
+      ctx.font = '16px Inter, sans-serif';
       const icon = category === 'recycle' ? '♻️' : category === 'compost' ? '🌱' : '🗑️';
-      ctx.fillText(icon, x + width - 30, y + 25);
+      ctx.fillText(icon, x + width - 25, y + 20);
     });
   }
 
   function handleCanvasClick(event: MouseEvent) {
+    if (!mounted || !overlayCanvasElement) return;
+    
     const rect = overlayCanvasElement.getBoundingClientRect();
     const scaleX = overlayCanvasElement.width / rect.width;
     const scaleY = overlayCanvasElement.height / rect.height;
@@ -273,7 +347,11 @@
     currentDetections = [];
     detections.set([]);
     selectedDetection.set(null);
-    previewImage.src = '';
+    uploadProgress = 0;
+    
+    if (previewImage) {
+      previewImage.src = '';
+    }
     
     // Clear canvases
     if (canvasElement) {
@@ -292,10 +370,21 @@
   }
 
   function triggerFileSelect() {
-    fileInput.click();
+    if (mounted && fileInput) {
+      fileInput.click();
+    }
+  }
+
+  function getFileSizeFormatted(bytes: number): string {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 </script>
 
+{#if mounted}
 <div class="max-w-4xl mx-auto space-y-6">
   <!-- Upload Interface -->
   <div class="card">
@@ -310,8 +399,8 @@
     <!-- Drag and Drop Area -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div 
-      class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center transition-colors
-             {dragActive ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'}"
+      class="border-2 border-dashed rounded-xl p-8 text-center transition-colors
+             {dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}"
       on:dragover={handleDragOver}
       on:dragleave={handleDragLeave}
       on:drop={handleDrop}
@@ -324,8 +413,18 @@
           <span class="text-4xl">✅</span>
           <p class="font-medium">{uploadedFile.name}</p>
           <p class="text-sm text-gray-500">
-            {(uploadedFile.size / 1024 / 1024).toFixed(1)} MB
+            {getFileSizeFormatted(uploadedFile.size)}
           </p>
+          
+          {#if uploadProgress > 0 && uploadProgress < 100}
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                class="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                style="width: {uploadProgress}%"
+              ></div>
+            </div>
+          {/if}
+          
           <div class="flex space-x-3 justify-center">
             <button on:click={triggerFileSelect} class="btn-secondary">
               📁 Choose Different
@@ -346,7 +445,7 @@
               </button>
             </p>
             <p class="text-sm text-gray-500">
-              Supports JPG, PNG, WebP • Max 10MB
+              Supports JPG, PNG, WebP • Max {getFileSizeFormatted(MAX_FILE_SIZE)} • Up to {MAX_BATCH_SIZE} files
             </p>
           </div>
         </div>
@@ -358,6 +457,7 @@
       bind:this={fileInput}
       type="file"
       accept="image/*"
+      multiple
       on:change={handleFileSelect}
       class="hidden"
     />
@@ -469,4 +569,11 @@
       </div>
     </div>
   </div>
-</div> 
+</div>
+{:else}
+  <div class="max-w-4xl mx-auto">
+    <div class="alert alert-info">
+      <span>Image upload component is initializing...</span>
+    </div>
+  </div>
+{/if} 
