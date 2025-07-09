@@ -512,15 +512,57 @@
         {/if}
         
         {#if $error}
-          <div class="mt-4 p-3 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg text-sm">
-            <p class="font-medium">⚠️ Camera Error</p>
-            <p class="mt-1 opacity-90">{$error}</p>
-            <button 
-              class="btn btn-sm btn-outline mt-3"
-              on:click={retryCamera}
-            >
-              Try Again
-            </button>
+          <div class="mt-4 p-4 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg text-sm">
+            <div class="flex items-start space-x-3">
+              <div class="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5">
+                <svg fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+              </div>
+              <div class="flex-1">
+                <p class="font-medium text-red-200">Camera Access Failed</p>
+                <p class="mt-1 text-red-300">{$error}</p>
+                
+                <div class="mt-4 space-y-3">
+                  <button 
+                    class="btn btn-sm btn-error w-full"
+                    on:click={retryCamera}
+                  >
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Try Again
+                  </button>
+                  
+                  <!-- Alternative options -->
+                  <div class="border-t border-red-400 pt-3">
+                    <p class="text-xs text-red-300 mb-2">Alternative options:</p>
+                    <div class="grid grid-cols-2 gap-2">
+                      <a href="/upload" class="btn btn-xs btn-outline btn-error">
+                        📤 Upload Image
+                      </a>
+                      <a href="/voice" class="btn btn-xs btn-outline btn-error">
+                        🎤 Voice Input
+                      </a>
+                    </div>
+                  </div>
+                  
+                  <!-- Troubleshooting tips -->
+                  <details class="mt-3">
+                    <summary class="text-xs text-red-300 cursor-pointer hover:text-red-200">
+                      🔧 Troubleshooting Tips
+                    </summary>
+                    <div class="mt-2 text-xs text-red-400 space-y-1">
+                      <p>• Check camera permissions in browser settings</p>
+                      <p>• Close other apps using the camera</p>
+                      <p>• Try refreshing the page</p>
+                      <p>• Ensure you're using HTTPS or localhost</p>
+                      <p>• Try a different browser (Chrome recommended)</p>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
           </div>
         {/if}
       </div>

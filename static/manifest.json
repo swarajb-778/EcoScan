@@ -1,7 +1,7 @@
 {
   "name": "EcoScan - AI Waste Classification",
   "short_name": "EcoScan",
-  "description": "AI-powered waste classification application for better environmental choices",
+  "description": "AI-powered waste classification application for better environmental choices. Real-time camera detection, voice input, and comprehensive disposal guidance.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,13 +10,13 @@
   "background_color": "#ffffff",
   "lang": "en",
   "dir": "ltr",
-  "categories": ["productivity", "utilities", "environmental"],
+  "categories": ["productivity", "utilities", "environmental", "education"],
   "icons": [
     {
       "src": "/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icon-192.png",
@@ -41,6 +41,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [
@@ -49,60 +55,60 @@
       "sizes": "390x844",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Camera detection in action"
+      "label": "Real-time camera detection in action"
     },
     {
       "src": "/screenshot-mobile-2.png",
       "sizes": "390x844",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Waste classification results"
+      "label": "Waste classification results with disposal instructions"
     },
     {
       "src": "/screenshot-desktop-1.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Desktop interface overview"
+      "label": "Desktop interface with comprehensive features"
     }
   ],
   "shortcuts": [
     {
       "name": "Camera Scan",
       "short_name": "Camera",
-      "description": "Start camera detection",
-      "url": "/",
+      "description": "Start real-time camera detection",
+      "url": "/?mode=camera",
       "icons": [
         {
-          "src": "/favicon.svg",
-          "sizes": "any",
-          "type": "image/svg+xml"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
     {
       "name": "Upload Image",
       "short_name": "Upload",
-      "description": "Upload image for analysis",
+      "description": "Upload image for waste analysis",
       "url": "/upload",
       "icons": [
         {
-          "src": "/favicon.svg",
-          "sizes": "any",
-          "type": "image/svg+xml"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
     {
       "name": "Voice Input",
       "short_name": "Voice",
-      "description": "Use voice to describe waste",
+      "description": "Use voice to describe waste items",
       "url": "/voice",
       "icons": [
         {
-          "src": "/favicon.svg",
-          "sizes": "any",
-          "type": "image/svg+xml"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     }
@@ -119,7 +125,7 @@
     {
       "action": "/upload",
       "accept": {
-        "image/*": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
+        "image/*": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"]
       }
     }
   ],
@@ -141,5 +147,7 @@
         }
       ]
     }
-  }
+  },
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "handle_links": "preferred"
 } 
