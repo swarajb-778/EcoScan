@@ -14,6 +14,7 @@
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { getQRScanSupportMessage } from '$lib/utils/qr.js';
+  import { isBrowser, isUserMediaSupported } from '$lib/utils/browser.js';
 
   let videoElement: HTMLVideoElement;
   let canvasElement: HTMLCanvasElement;
@@ -33,6 +34,11 @@
   };
 
   onMount(async () => {
+    if (!isBrowser()) {
+      console.warn('CameraView skipping initialization during SSR');
+      return;
+    }
+    
     await initializeML();
     await startCamera();
   });
@@ -42,6 +48,8 @@
   });
 
   async function initializeML() {
+    if (!isBrowser()) return;
+    
     setLoadingState(true);
     try {
       // Initialize the ML models
@@ -66,12 +74,15 @@
   }
 
   async function startCamera() {
+    if (!isBrowser()) return;
+    
     setLoadingState(true);
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (!isUserMediaSupported()) {
         setError('Camera access is not supported in this browser.');
         return;
       }
+      
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
       if (videoInputs.length === 0) {
@@ -99,6 +110,8 @@
   }
 
   function setupCanvas() {
+    if (!isBrowser() || !videoElement) return;
+    
     const { videoWidth, videoHeight } = videoElement;
     
     // Set canvas sizes to match video
@@ -118,7 +131,8 @@
   }
 
   function checkLowLightAndResolution() {
-    if (!canvasElement) return;
+    if (!isBrowser() || !canvasElement) return;
+    
     const ctx = canvasElement.getContext('2d');
     if (!ctx) return;
     const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
@@ -141,10 +155,10 @@
   }
 
   function startDetectionLoop() {
-    if (!detector || !classifier) return;
+    if (!isBrowser() || !detector || !classifier) return;
 
     const detectFrame = async () => {
-      if (!isDetecting && videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+      if (!isDetecting && videoElement && videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
         isDetecting = true;
         const startTime = performance.now();
 
@@ -196,13 +210,17 @@
         }
       }
 
-      animationId = requestAnimationFrame(detectFrame);
+      if (isBrowser()) {
+        animationId = requestAnimationFrame(detectFrame);
+      }
     };
 
     detectFrame();
   }
 
   function drawDetections(detectedObjects: Detection[]) {
+    if (!isBrowser() || !overlayCanvasElement) return;
+    
     const ctx = overlayCanvasElement.getContext('2d')!;
     ctx.clearRect(0, 0, overlayCanvasElement.width, overlayCanvasElement.height);
 
@@ -247,6 +265,8 @@
   }
 
   function handleCanvasClick(event: MouseEvent) {
+    if (!isBrowser() || !overlayCanvasElement) return;
+    
     const rect = overlayCanvasElement.getBoundingClientRect();
     const scaleX = overlayCanvasElement.width / rect.width;
     const scaleY = overlayCanvasElement.height / rect.height;
@@ -266,7 +286,7 @@
   }
 
   function cleanup() {
-    if (animationId) {
+    if (isBrowser() && animationId) {
       cancelAnimationFrame(animationId);
     }
     if (detector) {
@@ -277,9 +297,19 @@
 
   // Handle window resize
   function handleResize() {
+    if (!isBrowser()) return;
+    
     if (videoElement && videoElement.videoWidth) {
       setupCanvas();
     }
+  }
+
+  // Start detection loop when video loads
+  function handleVideoLoad() {
+    if (!isBrowser()) return;
+    
+    setupCanvas();
+    startDetectionLoop();
   }
 </script>
 
@@ -293,6 +323,7 @@
     playsinline
     muted
     class="w-full h-full object-cover"
+    on:loadeddata={handleVideoLoad}
   />
   
   <!-- Hidden canvas for processing -->
