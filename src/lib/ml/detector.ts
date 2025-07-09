@@ -1,9 +1,10 @@
 import { InferenceSession, Tensor } from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
-import { webglManager } from '../utils/webgl-manager.js';
+import { getWebGLManager } from '../utils/webgl-manager.js';
 import { adaptiveEngine, type OptimizationStrategy } from './adaptive-engine.js';
 import { abTestingFramework } from '$lib/utils/ab-testing.js';
 import { modelExperiment } from '$lib/experiments';
+import { isBrowser } from '../utils/browser.js';
 
 // Model integrity and fallback configuration
 interface ModelIntegrity {
@@ -70,6 +71,17 @@ export class ObjectDetector {
   }
 
   private setupWebGLIntegration(): void {
+    if (!isBrowser()) {
+      console.warn('Skipping WebGL integration during SSR');
+      return;
+    }
+
+    const webglManager = getWebGLManager();
+    if (!webglManager) {
+      console.warn('WebGL manager not available');
+      return;
+    }
+
     // Register for WebGL context recovery
     webglManager.addRecoveryCallback(this.webglRecoveryBound);
 
@@ -153,7 +165,8 @@ export class ObjectDetector {
       }
 
       // Recreate the session with WebGL context check
-      if (webglManager.isContextAvailable()) {
+      const webglManager = getWebGLManager();
+      if (webglManager && webglManager.isContextAvailable()) {
         await this.initializeWithContext();
       } else {
         console.warn('WebGL context not available, deferring ML recovery');
@@ -197,6 +210,18 @@ export class ObjectDetector {
 
   private async initializeWithContext(): Promise<void> {
     // Enhanced initialization with WebGL context awareness
+    const webglManager = getWebGLManager();
+    if (!webglManager) {
+      // Fallback to CPU-only execution
+      this.session = await InferenceSession.create(this.modelState.currentModel, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all',
+        enableMemPattern: false,
+        enableCpuMemArena: false
+      });
+      return;
+    }
+
     const webglState = webglManager.getState();
     const webglConfig = webglManager.getConfig();
     
@@ -230,8 +255,10 @@ export class ObjectDetector {
     
     while (attempts < maxAttempts) {
       try {
+        const webglManager = getWebGLManager();
+        
         // Check WebGL availability first
-        if (!webglManager.isContextAvailable()) {
+        if (!webglManager || !webglManager.isContextAvailable()) {
           console.warn('WebGL context not available, using CPU-only inference');
         }
 
@@ -258,7 +285,7 @@ export class ObjectDetector {
         console.log(`🤖 YOLO model loaded successfully: ${this.modelState.currentModelName} (${this.modelState.currentModel})`);
         return;
         
-      } catch (error: any) {
+      } catch (error) {
         attempts++;
         this.modelState.failureCount++;
         console.error(`Attempt ${attempts + 1} failed for ${this.modelState.currentModel}:`, error);
@@ -430,8 +457,10 @@ export class ObjectDetector {
       return this.getLastDetections();
     }
 
+    const webglManager = getWebGLManager();
+    
     // Check WebGL context before inference
-    if (!webglManager.isContextAvailable()) {
+    if (webglManager && !webglManager.isContextAvailable()) {
       console.warn('WebGL context lost during inference, attempting recovery');
       throw new Error('WebGL context not available for inference');
     }
@@ -456,6 +485,10 @@ export class ObjectDetector {
       
       // Monitor for WebGL context loss during inference
       const contextLossPromise = new Promise((_, reject) => {
+        if (!isBrowser()) {
+          return; // Skip context loss monitoring during SSR
+        }
+        
         const handleLoss = () => {
           window.removeEventListener('webgl-context-lost', handleLoss);
           reject(new Error('WebGL context lost during inference'));
@@ -785,15 +818,23 @@ export class ObjectDetector {
 
   dispose(): void {
     // Clean up adaptive integration
-    window.removeEventListener('adaptive-config-change', this.adaptiveConfigBound);
+    if (isBrowser()) {
+      window.removeEventListener('adaptive-config-change', this.adaptiveConfigBound);
+    }
     
     // Clean up WebGL integration with proper typing
-    webglManager.removeRecoveryCallback(this.webglRecoveryBound);
-    window.removeEventListener('webgl-context-lost', this.handleWebGLLoss.bind(this) as EventListener);
-    window.removeEventListener('webgl-context-restored', this.handleWebGLRestore.bind(this) as EventListener);
-    window.removeEventListener('gpu-memory-pressure', ((event: Event) => {
-      this.handleMemoryPressure(event as CustomEvent);
-    }) as EventListener);
+    const webglManager = getWebGLManager();
+    if (webglManager) {
+      webglManager.removeRecoveryCallback(this.webglRecoveryBound);
+    }
+    
+    if (isBrowser()) {
+      window.removeEventListener('webgl-context-lost', this.handleWebGLLoss.bind(this) as EventListener);
+      window.removeEventListener('webgl-context-restored', this.handleWebGLRestore.bind(this) as EventListener);
+      window.removeEventListener('gpu-memory-pressure', ((event: Event) => {
+        this.handleMemoryPressure(event as CustomEvent);
+      }) as EventListener);
+    }
 
     // Dispose session
     if (this.session) {
