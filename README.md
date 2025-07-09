@@ -1,52 +1,18 @@
-# 🌱 EcoScan - AI-Powered Waste Classification
+# EcoScan 🌱
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![SvelteKit](https://img.shields.io/badge/SvelteKit-FF3E00?logo=svelte&logoColor=white)](https://kit.svelte.dev/)
-[![PWA](https://img.shields.io/badge/PWA-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
-
-> **Real-time waste classification using computer vision and voice recognition for better environmental choices**
-
-EcoScan is a cutting-edge Progressive Web Application that leverages AI to help users properly classify and dispose of waste items. Using advanced computer vision, voice recognition, and a comprehensive waste database, EcoScan makes environmental responsibility accessible to everyone.
+AI-powered waste classification application using computer vision to help users sort waste correctly for sustainable living.
 
 ## ✨ Features
 
-### 🤖 AI-Powered Detection
-- **Real-time Object Detection**: YOLOv8 neural network with 95%+ accuracy
-- **Local Processing**: All AI inference happens on your device for privacy
-- **160+ Waste Categories**: Comprehensive classification database
-- **Smart Recommendations**: Disposal instructions and environmental impact
-
-### 📱 Multi-Modal Input
-- **📸 Camera Detection**: Real-time waste identification through camera
-- **📤 Image Upload**: Drag & drop or browse to analyze existing photos
-- **🎤 Voice Input**: Describe items using speech recognition
-- **🔄 Cross-Platform**: Works on mobile, tablet, and desktop
-
-### 🌍 Environmental Focus
-- **Recycling Guidelines**: Proper disposal methods for each category
-- **Environmental Impact**: Learn about the ecological effects of waste
-- **Local Processing**: Zero carbon footprint from server processing
-- **Educational Content**: Comprehensive information about sustainability
-
-### 🔒 Privacy-First Design
-- **Local Processing**: Images never leave your device
-- **No Data Collection**: Personal information stays private
-- **Offline Capable**: Full functionality without internet connection
-- **Anonymous Analytics**: Optional usage statistics only
-
-### 📊 Advanced Features
-- **Performance Monitoring**: Real-time analytics and optimization
-- **PWA Support**: Install as native app on any device
-- **Accessibility**: WCAG compliant with screen reader support
-- **Responsive Design**: Optimized for all screen sizes
+- **AI-Powered Detection**: Advanced YOLOv8 object detection for waste identification
+- **Multi-Modal Input**: Camera capture, image upload, and voice input support
+- **Real-Time Classification**: Instant waste categorization (recycle, compost, landfill)
+- **Adaptive Performance**: Dynamic optimization based on device capabilities
+- **Progressive Web App**: Installable with offline capabilities
+- **Comprehensive Testing**: Built-in testing framework and performance monitoring
+- **Accessibility First**: Full keyboard navigation and screen reader support
 
 ## 🚀 Quick Start
-
-### Online Demo
-Visit [EcoScan](https://your-deployment-url.com) to try it instantly - no installation required!
-
-### Local Development
 
 ```bash
 # Clone the repository
@@ -62,246 +28,107 @@ npm run dev
 # Open http://localhost:5173
 ```
 
-### Production Build
+## 🏗️ Development
+
+### Prerequisites
+
+- Node.js 18+ 
+- npm or yarn
+- Modern browser with WebGL support
+
+### Scripts
 
 ```bash
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-
-# Deploy to your preferred platform
-npm run deploy
+npm run dev          # Start development server
+npm run build        # Build for production
+npm run preview      # Preview production build
+npm run check        # Run type checking
+npm run lint         # Run linting
+npm run format       # Format code with Prettier
 ```
+
+### Testing
+
+Access the developer tools at `/dev` in development mode for:
+
+- **Concurrent User Simulation**: Test with multiple simulated users
+- **Automated Testing**: Run comprehensive test suites
+- **Performance Monitoring**: Real-time metrics and optimization
+
+## 🧠 AI Models
+
+The application uses ONNX.js with YOLOv8 models:
+
+- **YOLOv8n**: Fast, lightweight detection (default)
+- **YOLOv8s**: Balanced speed and accuracy
+- **YOLOv8m**: Higher accuracy for complex scenes
+
+Models are loaded dynamically based on device capabilities and user settings.
 
 ## 🏗️ Architecture
 
-### Technology Stack
-- **Frontend**: SvelteKit + TypeScript
-- **AI/ML**: YOLOv8 + ONNX Runtime Web
-- **Styling**: TailwindCSS + Custom Components
-- **PWA**: Vite PWA Plugin + Service Workers
-- **Search**: Fuse.js for fuzzy matching
-- **Analytics**: Custom privacy-focused system
+### Core Technologies
 
-### Project Structure
-```
-src/
-├── lib/
-│   ├── components/          # Reusable UI components
-│   │   ├── CameraView.svelte
-│   │   ├── ImageUpload.svelte
-│   │   ├── VoiceInput.svelte
-│   │   └── DetectionDetails.svelte
-│   ├── ml/                  # Machine learning modules
-│   │   ├── detector.ts      # YOLO object detection
-│   │   ├── classifier.ts    # Waste classification
-│   │   └── preprocessing.ts # Image processing
-│   ├── utils/               # Utility libraries
-│   │   ├── camera.ts        # Camera management
-│   │   ├── voice.ts         # Speech recognition
-│   │   ├── analytics.ts     # Performance monitoring
-│   │   └── qr.ts           # QR code generation
-│   ├── stores/              # Svelte stores
-│   │   └── appStore.ts     # Global state management
-│   ├── types/               # TypeScript definitions
-│   └── config.ts           # App configuration
-├── routes/                  # SvelteKit routes
-│   ├── +layout.svelte      # App layout
-│   ├── +page.svelte        # Camera page
-│   ├── upload/             # Image upload page
-│   ├── voice/              # Voice input page
-│   ├── about/              # About page
-│   ├── privacy/            # Privacy policy
-│   └── help/               # Help & support
-└── static/
-    ├── models/             # AI model files
-    ├── data/               # Waste classification data
-    └── icons/              # PWA icons
-```
+- **Frontend**: SvelteKit with TypeScript
+- **AI/ML**: ONNX.js, YOLOv8, Custom waste classifier
+- **Styling**: TailwindCSS with DaisyUI
+- **State Management**: Svelte stores with SSR safety
+- **PWA**: Service Worker with offline caching
 
-## 🧠 AI Model Details
+### Key Components
 
-### YOLOv8 Object Detection
-- **Model**: YOLOv8n (Nano) optimized for web
-- **Format**: ONNX for cross-platform compatibility
-- **Size**: 12.2MB compressed
-- **Performance**: <100ms inference time on modern devices
-- **Accuracy**: 95%+ on common waste items
+- **Object Detection**: Real-time waste item detection
+- **Classification Engine**: Waste category determination
+- **Adaptive Engine**: Performance optimization
+- **WebGL Manager**: GPU acceleration management
+- **A/B Testing**: Experiment framework for model comparison
 
-### Waste Classification Database
-- **Categories**: Recycling, Composting, Landfill, Hazardous
-- **Items**: 160+ common household waste items
-- **Fuzzy Search**: Intelligent matching with Fuse.js
-- **Localization**: Extensible for regional guidelines
+## 📱 Browser Support
 
-## 📱 PWA Features
+- Chrome 90+
+- Firefox 88+
+- Safari 14+
+- Edge 90+
 
-### Installation
-- **One-click Install**: Browser prompt for easy installation
-- **App Shortcuts**: Quick access to camera, upload, and voice features
-- **File Handling**: Open images directly in EcoScan
-- **Share Target**: Receive images from other apps
+### Required Features
 
-### Offline Capability
-- **Service Worker**: Full offline functionality
-- **Model Caching**: AI models cached locally
-- **Data Storage**: Classification database stored locally
-- **Sync**: Optional background sync when online
+- WebGL for GPU acceleration
+- getUserMedia for camera access
+- Web Audio API for audio feedback (optional)
+- Service Worker for PWA features
 
 ## 🔧 Configuration
 
 ### Environment Variables
+
 ```env
-# App Configuration
-VITE_APP_VERSION=1.0.0
-VITE_APP_NAME=EcoScan
-VITE_APP_DESCRIPTION="AI-Powered Waste Classification"
+# Optional: Analytics and monitoring
+VITE_ANALYTICS_ID=your_analytics_id
+VITE_SENTRY_DSN=your_sentry_dsn
 
-# Analytics (Optional)
-VITE_ANALYTICS_ENABLED=true
-VITE_ANALYTICS_ID=your-analytics-id
-
-# API Configuration (Optional)
-VITE_API_BASE_URL=https://api.ecoscan.app
-VITE_API_TIMEOUT=5000
-
-# Feature Flags
-VITE_FEATURE_VOICE=true
-VITE_FEATURE_ANALYTICS=true
-VITE_FEATURE_QR_SHARING=true
+# Model configurations
+VITE_MODEL_PATH=/models/
+VITE_DEFAULT_MODEL=yolov8n.onnx
 ```
 
-### Model Configuration
-```typescript
-// src/lib/config.ts
-export const modelConfig = {
-  yolo: {
-    modelPath: '/models/yolov8n.onnx',
-    inputSize: 640,
-    confidenceThreshold: 0.5,
-    iouThreshold: 0.45
-  },
-  classification: {
-    dataPath: '/data/waste-categories.json',
-    fuzzyThreshold: 0.6,
-    maxResults: 5
-  }
-};
-```
+### Model Customization
 
-## 🧪 Testing
-
-### Unit Tests
-```bash
-# Run unit tests
-npm run test
-
-# Run tests with coverage
-npm run test:coverage
-
-# Watch mode for development
-npm run test:watch
-```
-
-### E2E Tests
-```bash
-# Run end-to-end tests
-npm run test:e2e
-
-# Run E2E tests in headless mode
-npm run test:e2e:headless
-```
-
-### Performance Testing
-```bash
-# Lighthouse audit
-npm run audit
-
-# Bundle analysis
-npm run analyze
-
-# Performance profiling
-npm run profile
-```
-
-## 🚀 Deployment
-
-### Vercel (Recommended)
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy to Vercel
-vercel --prod
-```
-
-### Netlify
-```bash
-# Build for production
-npm run build
-
-# Deploy to Netlify
-netlify deploy --prod --dir=build
-```
-
-### Docker
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]
-```
-
-### GitHub Pages
-```bash
-# Install adapter
-npm install -D @sveltejs/adapter-static
-
-# Configure for static deployment
-# Update svelte.config.js with adapter-static
-
-# Build and deploy
-npm run build
-# Upload build/ directory to GitHub Pages
-```
-
-## 📊 Performance Metrics
-
-### Core Web Vitals
-- **First Contentful Paint**: <1.5s
-- **Largest Contentful Paint**: <2.5s
-- **Cumulative Layout Shift**: <0.1
-- **First Input Delay**: <100ms
-
-### AI Performance
-- **Model Load Time**: <3s on first visit
-- **Inference Time**: <100ms on modern devices
-- **Memory Usage**: <200MB typical
-- **Battery Impact**: Minimal with optimizations
+Place custom ONNX models in `static/models/` and update the configuration in `src/lib/ml/detector.ts`.
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes and test thoroughly
-4. Commit: `git commit -m 'Add amazing feature'`
-5. Push: `git push origin feature/amazing-feature`
-6. Open a Pull Request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ### Code Style
-- **TypeScript**: Strict mode enabled
-- **Formatting**: Prettier with default config
-- **Linting**: ESLint with SvelteKit rules
-- **Testing**: Vitest + Playwright for E2E
+
+- Use TypeScript for type safety
+- Follow Prettier formatting rules
+- Add JSDoc comments for public APIs
+- Include tests for new features
 
 ## 📄 License
 
@@ -309,45 +136,17 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- **YOLOv8**: Ultralytics for the object detection model
-- **ONNX Runtime**: Microsoft for the inference engine
-- **SvelteKit**: The Svelte team for the amazing framework
-- **TailwindCSS**: For the utility-first CSS framework
-- **Community**: All contributors and users who make this project possible
+- [YOLOv8](https://github.com/ultralytics/ultralytics) for object detection
+- [ONNX.js](https://onnxjs.ai/) for browser-based AI inference  
+- [SvelteKit](https://kit.svelte.dev/) for the amazing framework
+- Environmental organizations promoting sustainable practices
 
 ## 📞 Support
 
-- **Documentation**: [Full Documentation](https://ecoscan-docs.com)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/ecoscan/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/ecoscan/discussions)
-- **Email**: support@ecoscan.app
-
-## 🗺️ Roadmap
-
-### Version 1.1 (Q1 2025)
-- [ ] Multi-language support
-- [ ] Enhanced voice commands
-- [ ] Barcode scanning integration
-- [ ] Community waste database
-
-### Version 1.2 (Q2 2025)
-- [ ] AR visualization
-- [ ] Location-based disposal finder
-- [ ] Gamification features
-- [ ] Social sharing
-
-### Version 2.0 (Q3 2025)
-- [ ] Custom model training
-- [ ] Enterprise features
-- [ ] API for third-party integration
-- [ ] Advanced analytics dashboard
+- Create an [Issue](https://github.com/yourusername/ecoscan/issues) for bug reports
+- Start a [Discussion](https://github.com/yourusername/ecoscan/discussions) for questions
+- Check the [Wiki](https://github.com/yourusername/ecoscan/wiki) for detailed documentation
 
 ---
 
-<div align="center">
-
-**Made with 💚 for a better planet**
-
-[Website](https://ecoscan.app) • [Demo](https://demo.ecoscan.app) • [Documentation](https://docs.ecoscan.app)
-
-</div>
+Made with 💚 for a sustainable future
