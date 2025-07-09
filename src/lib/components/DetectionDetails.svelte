@@ -67,22 +67,23 @@
 </script>
 
 {#if $selectedDetection}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- Modal backdrop -->
   <div 
     class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" 
-    on:click={closeDetails}
     role="dialog"
     aria-modal="true"
     aria-labelledby="detection-title"
-    tabindex="0"
-    on:keydown={(e) => { if (e.key === 'Escape') closeDetails(); }}
   >
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <!-- Close button for backdrop -->
+    <button
+      class="absolute inset-0 w-full h-full cursor-default"
+      on:click={closeDetails}
+      aria-label="Close modal by clicking outside"
+    ></button>
+    
+    <!-- Modal content -->
     <div 
-      class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto" 
-      on:click|stopPropagation
+      class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto relative z-10" 
       role="document"
     >
       <!-- Header -->
@@ -99,7 +100,7 @@
           </div>
           <button 
             on:click={closeDetails}
-            class="text-white hover:text-gray-200 transition-colors"
+            class="text-white hover:text-gray-200 transition-colors p-1 rounded-lg"
             aria-label="Close detection details"
           >
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -174,6 +175,11 @@
               <p>Category: {$selectedDetection.category}</p>
             </div>
           </details>
+        </div>
+        
+        <!-- Keyboard navigation hint -->
+        <div class="text-xs text-gray-500 text-center">
+          Press Escape to close
         </div>
       </div>
     </div>
