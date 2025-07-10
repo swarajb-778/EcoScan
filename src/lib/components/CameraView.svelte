@@ -34,6 +34,7 @@
   let lastFrameTime = 0;
   let frameCount = 0;
   let mountStartTime = 0;
+  let captureFlashOpacity = 0;
 
   // Local component state for SSR safety
   let localIsLoading = false;
@@ -792,11 +793,30 @@
         perf.start('onlineDetection');
         if (detector) {
           // Pass full ImageData object to detector
-          detectedObjects = await detector.detect(imageData);
+          let rawDetections = await detector.detect(imageData);
           
+          // Classify each detection
+          if (classifier) {
+            const activeClassifier = classifier;
+            detectedObjects = rawDetections.map(det => {
+              const classification = activeClassifier.classify(det.class);
+              if (classification) {
+                return {
+                  ...det,
+                  category: classification.category,
+                  instructions: classification.instructions,
+                  label: det.class.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                };
+              }
+              return det;
+            });
+          } else {
+            detectedObjects = rawDetections;
+          }
+
           if (detectedObjects.length > 0) {
-            console.log(`✅ Detected ${detectedObjects.length} objects:`, 
-              detectedObjects.map(d => `${d.label} (${(d.confidence * 100).toFixed(1)}%)`));
+            console.log(`✅ Detected and classified ${detectedObjects.length} objects:`, 
+              detectedObjects.map(d => `${d.label} -> ${d.category} (${(d.confidence * 100).toFixed(1)}%)`));
           }
         } else {
           throw new Error('Detector not initialized');
@@ -874,6 +894,15 @@
       
       // Draw current video frame to canvas
       ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+      // Trigger flash effect
+      captureFlashOpacity = 1;
+      setTimeout(() => {
+        captureFlashOpacity = 0;
+      }, 300);
+
+      // Pause video for feedback
+      videoElement.pause();
       
       // Run detection on the captured frame
       console.log('📸 Analyzing captured image...');
@@ -883,8 +912,28 @@
       
       if (detector) {
         // Run detection with higher confidence threshold for captured images
-        capturedDetections = await detector.detect(imageData);
-        console.log(`✅ Detected ${capturedDetections.length} objects in captured image`);
+        const rawDetections = await detector.detect(imageData);
+
+        // Classify each detection
+        if (classifier) {
+          const activeClassifier = classifier;
+          capturedDetections = rawDetections.map(det => {
+            const classification = activeClassifier.classify(det.class);
+            if (classification) {
+              return {
+                ...det,
+                category: classification.category,
+                instructions: classification.instructions,
+                label: det.class.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              };
+            }
+            return det;
+          });
+        } else {
+          capturedDetections = rawDetections;
+        }
+
+        console.log(`✅ Detected and classified ${capturedDetections.length} objects in captured image`);
       }
       
       // Update detections store
@@ -896,10 +945,11 @@
       // Save image if user wants (could add download button)
       // const imageDataUrl = canvasElement.toDataURL('image/jpeg', 0.9);
       
-      // Resume detection loop if it was running
+      // Resume video and detection loop
+      videoElement.play();
       if (wasDetecting) {
         isDetecting = true;
-        startDetectionLoop(); // Use existing function to restart detection
+        startDetectionLoop();
       }
       
       // Set success message
@@ -1177,6 +1227,9 @@
     on:click={handleCanvasClick}
     class="absolute inset-0 cursor-pointer"
   />
+
+  <!-- Capture flash effect -->
+  <div class="absolute inset-0 bg-white transition-opacity duration-300 pointer-events-none" style="opacity: {captureFlashOpacity};" />
 
   <!-- Loading and Permission UI -->
   {#if !browserPermissionsGranted}
