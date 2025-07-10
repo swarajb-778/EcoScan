@@ -3,7 +3,7 @@
   import { trackEvent } from '$lib/utils/analytics';
 
   onMount(() => {
-    trackEvent('page_view', { page: 'about' });
+    trackEvent('interaction', 'page_view', 'about');
   });
 
   const features = [
@@ -233,14 +233,14 @@
       <a 
         href="/" 
         class="bg-white text-green-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-        on:click={() => trackEvent('cta_click', { source: 'about_page', destination: 'camera' })}
+        on:click={() => trackEvent('interaction', 'cta_click', 'camera', undefined, undefined, { source: 'about_page' })}
       >
         📸 Start with Camera
       </a>
       <a 
         href="/upload" 
         class="bg-green-400 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-300 transition-colors"
-        on:click={() => trackEvent('cta_click', { source: 'about_page', destination: 'upload' })}
+        on:click={() => trackEvent('interaction', 'cta_click', 'upload', undefined, undefined, { source: 'about_page' })}
       >
         📤 Upload Image
       </a>
