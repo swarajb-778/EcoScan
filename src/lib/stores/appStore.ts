@@ -81,7 +81,13 @@ export const performanceMetrics = createSSRSafeStore<PerformanceMetrics>({
   batteryLevel: 1,
   isCharging: true,
   thermalState: 'normal',
-  lastUpdate: Date.now()
+  lastUpdate: Date.now(),
+  inferenceTime: 0,
+  modelLoadTime: 0,
+  cameraInitTime: 0,
+  componentMountTime: 0,
+  cameraResolution: '1920x1080',
+  frameRate: 30
 });
 
 // PWA install state
@@ -188,7 +194,7 @@ export function setSuccess(message: string | null) {
   }
 }
 
-export function setLoadingState(isLoadingValue: boolean, stage?: string, progress?: number, message?: string) {
+export function setLoadingState(isLoadingValue: boolean, stage?: AppLoadingState['stage'], progress?: number, message?: string) {
   loadingState.set({
     isLoading: isLoadingValue,
     stage: stage || 'idle',
