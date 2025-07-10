@@ -3,7 +3,7 @@
   import { trackEvent } from '$lib/utils/analytics';
 
   onMount(() => {
-    trackEvent('page_view', { page: 'privacy' });
+    trackEvent('interaction', 'page_view', 'privacy');
   });
 </script>
 
@@ -268,7 +268,7 @@
       <a 
         href="/" 
         class="bg-white text-green-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors inline-block"
-        on:click={() => trackEvent('privacy_cta_click', { destination: 'home' })}
+        on:click={() => trackEvent('interaction', 'privacy_cta_click', 'home')}
       >
         Start Using EcoScan
       </a>
