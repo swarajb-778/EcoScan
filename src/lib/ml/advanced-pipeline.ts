@@ -3,7 +3,28 @@
  * Sophisticated machine learning with ensemble models, transfer learning, and federated learning
  */
 
-import * as tf from '@tensorflow/tfjs';
+// TensorFlow.js types - optional dependency
+type TensorFlowType = any;
+type LayersModel = any;
+type GraphModel = any;
+type Tensor = any;
+
+// Check if TensorFlow.js is available
+const isTensorFlowAvailable = (): boolean => {
+  try {
+    return typeof window !== 'undefined' && 'tf' in window;
+  } catch {
+    return false;
+  }
+};
+
+// Get TensorFlow instance if available
+const getTensorFlow = (): TensorFlowType | null => {
+  if (isTensorFlowAvailable()) {
+    return (window as any).tf;
+  }
+  return null;
+};
 
 export interface ModelConfig {
   name: string;
@@ -68,10 +89,10 @@ export interface EnsemblePrediction {
 }
 
 class AdvancedMLPipeline {
-  private models: Map<string, tf.LayersModel | tf.GraphModel> = new Map();
+  private models: Map<string, LayersModel | GraphModel> = new Map();
   private ensembleConfig: EnsembleConfig | null = null;
-  private transferModels: Map<string, tf.LayersModel> = new Map();
-  private federatedState: Map<string, tf.Tensor[]> = new Map();
+  private transferModels: Map<string, LayersModel> = new Map();
+  private federatedState: Map<string, Tensor[]> = new Map();
   
   // Model performance tracking
   private performanceMetrics: Map<string, {
@@ -82,9 +103,9 @@ class AdvancedMLPipeline {
   }> = new Map();
   
   // Advanced features
-  private uncertaintyEstimator: tf.LayersModel | null = null;
-  private dataAugmentationPipeline: tf.Sequential | null = null;
-  private activeLearningSamples: Array<{ input: tf.Tensor; uncertainty: number }> = [];
+  private uncertaintyEstimator: LayersModel | null = null;
+  private dataAugmentationPipeline: LayersModel | null = null;
+  private activeLearningSamples: Array<{ input: Tensor; uncertainty: number }> = [];
   
   constructor() {
     this.initializePipeline();
@@ -95,10 +116,15 @@ class AdvancedMLPipeline {
    */
   private async initializePipeline(): Promise<void> {
     // Set TensorFlow.js backend optimization
-    await tf.ready();
+    const tf = getTensorFlow();
+    if (tf) {
+      await tf.ready();
+    } else {
+      console.warn('[AdvancedMLPipeline] TensorFlow.js not available. Advanced features disabled.');
+    }
     
     // Enable mixed precision if supported
-    if (tf.env().getBool('WEBGL_RENDER_FLOAT32_ENABLED')) {
+    if (tf && tf.env().getBool('WEBGL_RENDER_FLOAT32_ENABLED')) {
       tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
     }
     
@@ -144,12 +170,17 @@ class AdvancedMLPipeline {
     try {
       console.log(`[AdvancedMLPipeline] Loading model: ${config.name}`);
       
-      let model: tf.LayersModel | tf.GraphModel;
-      
-      if (config.type === 'detection' && config.architecture === 'yolo') {
-        model = await tf.loadGraphModel(config.url);
+      let model: LayersModel | GraphModel;
+      const tf = getTensorFlow();
+
+      if (tf) {
+        if (config.type === 'detection' && config.architecture === 'yolo') {
+          model = await tf.loadGraphModel(config.url);
+        } else {
+          model = await tf.loadLayersModel(config.url);
+        }
       } else {
-        model = await tf.loadLayersModel(config.url);
+        throw new Error('TensorFlow.js not available for model loading.');
       }
       
       // Optimize model for inference
@@ -167,7 +198,7 @@ class AdvancedMLPipeline {
   /**
    * Optimize model for inference
    */
-  private async optimizeModel(model: tf.LayersModel | tf.GraphModel, config: ModelConfig): Promise<void> {
+  private async optimizeModel(model: LayersModel | GraphModel, config: ModelConfig): Promise<void> {
     // Quantization for smaller models
     if (config.precision === 'int8') {
       // Note: This would require TensorFlow.js quantization support
@@ -175,22 +206,25 @@ class AdvancedMLPipeline {
     }
     
     // Warm up the model with dummy data
-    const dummyInput = tf.zeros([1, 224, 224, 3]);
-    
-    try {
-      await model.predict(dummyInput);
-      dummyInput.dispose();
-      console.log(`[AdvancedMLPipeline] Model ${config.name} warmed up`);
-    } catch (error) {
-      dummyInput.dispose();
-      console.warn(`[AdvancedMLPipeline] Model warmup failed for ${config.name}:`, error);
+    const tf = getTensorFlow();
+    if (tf) {
+      const dummyInput = tf.zeros([1, 224, 224, 3]);
+      
+      try {
+        await model.predict(dummyInput);
+        dummyInput.dispose();
+        console.log(`[AdvancedMLPipeline] Model ${config.name} warmed up`);
+      } catch (error) {
+        dummyInput.dispose();
+        console.warn(`[AdvancedMLPipeline] Model warmup failed for ${config.name}:`, error);
+      }
     }
   }
 
   /**
    * Run ensemble prediction
    */
-  async predictWithEnsemble(input: tf.Tensor): Promise<EnsemblePrediction> {
+  async predictWithEnsemble(input: Tensor): Promise<EnsemblePrediction> {
     if (!this.ensembleConfig) {
       throw new Error('Ensemble not configured');
     }
@@ -241,11 +275,11 @@ class AdvancedMLPipeline {
    * Run prediction on a single model
    */
   private async runSinglePrediction(
-    model: tf.LayersModel | tf.GraphModel,
-    input: tf.Tensor,
+    model: LayersModel | GraphModel,
+    input: Tensor,
     config: ModelConfig
   ): Promise<Array<{ class: string; confidence: number; bbox?: any }>> {
-    const prediction = model.predict(input) as tf.Tensor;
+    const prediction = model.predict(input) as Tensor;
     
     if (config.type === 'detection') {
       return this.parseDetectionResults(prediction, config);
@@ -258,7 +292,7 @@ class AdvancedMLPipeline {
    * Parse detection model results
    */
   private parseDetectionResults(
-    prediction: tf.Tensor,
+    prediction: Tensor,
     config: ModelConfig
   ): Array<{ class: string; confidence: number; bbox: any }> {
     // Assume YOLO-style output: [batch, grid, grid, (classes + 5)]
@@ -299,9 +333,14 @@ class AdvancedMLPipeline {
    * Parse classification model results
    */
   private parseClassificationResults(
-    prediction: tf.Tensor,
+    prediction: Tensor,
     config: ModelConfig
   ): Array<{ class: string; confidence: number }> {
+    const tf = getTensorFlow();
+    if (!tf) {
+      throw new Error('TensorFlow.js not available for classification parsing');
+    }
+    
     const probabilities = tf.softmax(prediction).dataSync();
     const results: Array<{ class: string; confidence: number }> = [];
     
@@ -451,20 +490,23 @@ class AdvancedMLPipeline {
    */
   private async initializeUncertaintyEstimator(): Promise<void> {
     // Create a simple uncertainty estimation network
-    this.uncertaintyEstimator = tf.sequential({
-      layers: [
-        tf.layers.dense({ inputShape: [1000], units: 256, activation: 'relu' }),
-        tf.layers.dropout({ rate: 0.3 }),
-        tf.layers.dense({ units: 128, activation: 'relu' }),
-        tf.layers.dropout({ rate: 0.3 }),
-        tf.layers.dense({ units: 1, activation: 'sigmoid' })
-      ]
-    });
+    const tf = getTensorFlow();
+    if (tf) {
+      this.uncertaintyEstimator = tf.sequential({
+        layers: [
+          tf.layers.dense({ inputShape: [1000], units: 256, activation: 'relu' }),
+          tf.layers.dropout({ rate: 0.3 }),
+          tf.layers.dense({ units: 128, activation: 'relu' }),
+          tf.layers.dropout({ rate: 0.3 }),
+          tf.layers.dense({ units: 1, activation: 'sigmoid' })
+        ]
+      });
 
-    this.uncertaintyEstimator.compile({
-      optimizer: tf.train.adam(0.001),
-      loss: 'meanSquaredError'
-    });
+      this.uncertaintyEstimator.compile({
+        optimizer: tf.train.adam(0.001),
+        loss: 'meanSquaredError'
+      });
+    }
   }
 
   /**
@@ -472,22 +514,25 @@ class AdvancedMLPipeline {
    */
   private setupDataAugmentation(): void {
     // Create augmentation pipeline using TensorFlow.js layers
-    this.dataAugmentationPipeline = tf.sequential({
-      layers: [
-        // Random flip
-        tf.layers.lambda({
-          func: (x: tf.Tensor) => tf.image.flipLeftRight(x as tf.Tensor4D)
-        }),
-        // Random rotation (simplified)
-        tf.layers.lambda({
-          func: (x: tf.Tensor) => x // Placeholder for rotation
-        }),
-        // Random brightness
-        tf.layers.lambda({
-          func: (x: tf.Tensor) => tf.image.adjustBrightness(x as tf.Tensor4D, 0.1)
-        })
-      ]
-    });
+    const tf = getTensorFlow();
+    if (tf) {
+      this.dataAugmentationPipeline = tf.sequential({
+        layers: [
+          // Random flip
+          tf.layers.lambda({
+            func: (x: Tensor) => tf.image.flipLeftRight(x as Tensor)
+          }),
+          // Random rotation (simplified)
+          tf.layers.lambda({
+            func: (x: Tensor) => x // Placeholder for rotation
+          }),
+          // Random brightness
+          tf.layers.lambda({
+            func: (x: Tensor) => tf.image.adjustBrightness(x as Tensor, 0.1)
+          })
+        ]
+      });
+    }
   }
 
   /**
@@ -497,6 +542,11 @@ class AdvancedMLPipeline {
     console.log(`[AdvancedMLPipeline] Setting up transfer learning from ${config.baseModel}`);
     
     // Load pre-trained base model
+    const tf = getTensorFlow();
+    if (!tf) {
+      throw new Error('TensorFlow.js not available for transfer learning.');
+    }
+
     const baseModel = await tf.loadLayersModel(config.baseModel);
     
     // Freeze specified layers
@@ -536,60 +586,67 @@ class AdvancedMLPipeline {
    * Train model with transfer learning
    */
   async trainWithTransferLearning(
-    trainData: tf.Tensor,
-    trainLabels: tf.Tensor,
-    validationData: tf.Tensor,
-    validationLabels: tf.Tensor,
+    trainData: Tensor,
+    trainLabels: Tensor,
+    validationData: Tensor,
+    validationLabels: Tensor,
     config: TransferLearningConfig
   ): Promise<void> {
-    const transferModel = Array.from(this.transferModels.values())[0];
+    const transferModel = this.transferModels.get(config.baseModel);
     if (!transferModel) {
-      throw new Error('Transfer learning model not initialized');
+      throw new Error(`Transfer model ${config.baseModel} not found`);
     }
 
-    console.log('[AdvancedMLPipeline] Starting transfer learning training');
+    // Freeze specified layers
+    transferModel.layers.slice(0, config.freezeLayers).forEach((layer: any) => {
+      layer.trainable = false;
+    });
 
-    // Apply data augmentation if enabled
+    // Compile model with new learning rate
+    transferModel.compile({
+      optimizer: `adam`,
+      loss: 'categoricalCrossentropy',
+      metrics: ['accuracy']
+    });
+
+    // Data augmentation
     let augmentedData = trainData;
     if (config.dataAugmentation && this.dataAugmentationPipeline) {
-      augmentedData = this.dataAugmentationPipeline.predict(trainData) as tf.Tensor;
+      augmentedData = this.dataAugmentationPipeline.predict(trainData) as Tensor;
     }
 
-    // Train the model
-    const history = await transferModel.fit(augmentedData, trainLabels, {
+    // Training
+    await transferModel.fit(augmentedData, trainLabels, {
       epochs: config.epochs,
       batchSize: config.batchSize,
       validationData: [validationData, validationLabels],
-      verbose: 1,
       callbacks: {
-        onEpochEnd: (epoch, logs) => {
-          console.log(`Epoch ${epoch + 1}: loss = ${logs?.loss}, val_loss = ${logs?.val_loss}`);
+        onEpochEnd: (epoch: number, logs: any) => {
+          console.log(`[AdvancedMLPipeline] Epoch ${epoch}: loss = ${logs.loss}, accuracy = ${logs.acc}`);
         }
       }
     });
 
-    // Fine-tuning phase
+    // Fine-tuning
     if (config.fineTuning) {
-      console.log('[AdvancedMLPipeline] Starting fine-tuning phase');
-      
-      // Unfreeze more layers for fine-tuning
-      transferModel.layers.forEach(layer => {
+      transferModel.layers.forEach((layer: any) => {
         layer.trainable = true;
       });
-      
-      // Use lower learning rate for fine-tuning
-      transferModel.compile({
-        optimizer: tf.train.adam(config.learningRate / 10),
-        loss: 'categoricalCrossentropy',
-        metrics: ['accuracy']
-      });
-      
-      await transferModel.fit(augmentedData, trainLabels, {
-        epochs: Math.floor(config.epochs / 2),
-        batchSize: config.batchSize,
-        validationData: [validationData, validationLabels],
-        verbose: 1
-      });
+
+      const tf = getTensorFlow();
+      if (tf) {
+        transferModel.compile({
+          optimizer: tf.train.adam(config.learningRate * 0.1), // Lower learning rate for fine-tuning
+          loss: 'categoricalCrossentropy',
+          metrics: ['accuracy']
+        });
+
+        await transferModel.fit(augmentedData, trainLabels, {
+          epochs: Math.floor(config.epochs / 2),
+          batchSize: config.batchSize,
+          validationData: [validationData, validationLabels]
+        });
+      }
     }
 
     // Clean up
@@ -609,7 +666,7 @@ class AdvancedMLPipeline {
     // Initialize model weights for each participant
     for (let i = 0; i < config.participants; i++) {
       const participantId = `participant_${i}`;
-      const baseModel = Array.from(this.models.values())[0] as tf.LayersModel;
+      const baseModel = Array.from(this.models.values())[0] as LayersModel;
       
       if (baseModel) {
         const modelWeights = baseModel.getWeights();
@@ -623,44 +680,56 @@ class AdvancedMLPipeline {
   /**
    * Perform federated averaging
    */
-  async federatedAveraging(updates: Map<string, tf.Tensor[]>): Promise<tf.Tensor[]> {
+  async federatedAveraging(updates: Map<string, Tensor[]>): Promise<Tensor[]> {
     const participantIds = Array.from(updates.keys());
     const numParticipants = participantIds.length;
-    
+
     if (numParticipants === 0) {
       throw new Error('No participant updates provided');
     }
-    
+
     // Get the shape from the first participant
     const firstUpdate = updates.get(participantIds[0])!;
-    const averagedWeights: tf.Tensor[] = [];
-    
+    const averagedWeights: Tensor[] = [];
+
+    const tf = getTensorFlow();
+    if (!tf) {
+      throw new Error('TensorFlow.js not available for federated averaging');
+    }
+
     // Average each weight tensor across all participants
     for (let i = 0; i < firstUpdate.length; i++) {
-      const tensorsToAverage: tf.Tensor[] = [];
-      
+      const tensorsToAverage: Tensor[] = [];
+
       participantIds.forEach(participantId => {
-        const participantWeights = updates.get(participantId)!;
-        tensorsToAverage.push(participantWeights[i]);
+        const participantWeights = updates.get(participantId);
+        if (participantWeights && participantWeights[i]) {
+          tensorsToAverage.push(participantWeights[i]);
+        }
       });
-      
-      // Stack tensors and compute mean
+
+      // Stack and average
       const stacked = tf.stack(tensorsToAverage);
       const averaged = tf.mean(stacked, 0);
-      
       averagedWeights.push(averaged);
-      
-      // Clean up intermediate tensors
+
+      // Cleanup
       stacked.dispose();
+      tensorsToAverage.forEach(tensor => tensor.dispose());
     }
-    
+
     return averagedWeights;
   }
 
   /**
    * Apply differential privacy to gradients
    */
-  private applyDifferentialPrivacy(gradients: tf.Tensor[], privacyBudget: number): tf.Tensor[] {
+  private applyDifferentialPrivacy(gradients: Tensor[], privacyBudget: number): Tensor[] {
+    const tf = getTensorFlow();
+    if (!tf) {
+      throw new Error('TensorFlow.js not available for differential privacy');
+    }
+    
     return gradients.map(gradient => {
       // Add calibrated noise for differential privacy
       const noise = tf.randomNormal(gradient.shape, 0, privacyBudget);
