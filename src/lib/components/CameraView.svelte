@@ -15,9 +15,7 @@
     isLoading,
     error,
     isCameraActive,
-    loadingState,
-    offlineStatus,
-    isOfflineMode
+    loadingState
   } from '$lib/stores/appStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
