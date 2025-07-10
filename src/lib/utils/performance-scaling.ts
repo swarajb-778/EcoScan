@@ -3,8 +3,6 @@
  * Monitors device capabilities and adjusts performance dynamically
  */
 
-import { isBrowser } from './browser.js';
-
 export interface DeviceCapabilities {
   cpuCores: number;
   deviceMemory: number; // GB
@@ -86,82 +84,151 @@ class PerformanceScaling {
   private onMetricsUpdateCallback: ((metrics: PerformanceMetrics) => void) | null = null;
   
   constructor() {
-    // Safe initialization with browser detection
-    this.deviceCapabilities = this.detectDeviceCapabilities();
-    this.thermalState = { state: 'nominal', throttlingActive: false, timestamp: Date.now() };
-    this.currentProfile = this.selectInitialProfile();
-    
-    // Only start monitoring in browser environment
-    if (isBrowser()) {
+    try {
+      // Make sure we initialize device capabilities first
+      this.deviceCapabilities = this.detectDeviceCapabilities();
+      console.log('[PerformanceScaling] Device capabilities detected:', this.deviceCapabilities);
+      
+      this.thermalState = { state: 'nominal', throttlingActive: false, timestamp: Date.now() };
+      this.currentProfile = this.selectInitialProfile();
+      
       this.initializeMonitoring();
       console.log('[PerformanceScaling] Initialized with profile:', this.currentProfile.name);
-    } else {
-      console.log('[PerformanceScaling] Initialized in non-browser environment with profile:', this.currentProfile.name);
+    } catch (error) {
+      console.error('[PerformanceScaling] Error during initialization:', error);
+      
+      // Set fallback values if detection fails
+      this.deviceCapabilities = {
+        cpuCores: 2,
+        deviceMemory: 2,
+        maxTouchPoints: 0,
+        connectionType: 'unknown',
+        effectiveType: '4g',
+        devicePixelRatio: 1,
+        hardwareConcurrency: 2,
+        userAgent: 'unknown',
+        platform: 'unknown'
+      };
+      
+      this.thermalState = { state: 'nominal', throttlingActive: false, timestamp: Date.now() };
+      this.currentProfile = this.getProfile('balanced'); // Use balanced profile as fallback
     }
   }
 
   /**
-   * Detect device capabilities with proper fallbacks
+   * Detect device capabilities with improved safety
    */
   private detectDeviceCapabilities(): DeviceCapabilities {
-    // Fallback capabilities for non-browser environments
-    const fallbackCapabilities: DeviceCapabilities = {
-      cpuCores: 4,
-      deviceMemory: 4,
-      maxTouchPoints: 0,
-      connectionType: 'unknown',
-      effectiveType: '4g',
-      devicePixelRatio: 1,
-      hardwareConcurrency: 4,
-      userAgent: 'EcoScan/1.0.0',
-      platform: 'unknown'
-    };
-
-    // Return fallback if not in browser
-    if (!isBrowser()) {
-      return fallbackCapabilities;
-    }
-
     try {
+      // Check if we have access to window and navigator
+      if (typeof window === 'undefined' || typeof window.navigator === 'undefined') {
+        throw new Error('Window or Navigator not available');
+      }
+      
       const navigator = window.navigator as any;
       const screen = window.screen;
       
+      // Extract values with safe defaults
+      const hardwareConcurrency = typeof navigator.hardwareConcurrency === 'number' ? 
+        navigator.hardwareConcurrency : 2;
+      
+      const deviceMemory = typeof navigator.deviceMemory === 'number' ? 
+        navigator.deviceMemory : 2;
+        
+      const maxTouchPoints = typeof navigator.maxTouchPoints === 'number' ? 
+        navigator.maxTouchPoints : 0;
+      
+      const connectionType = navigator.connection && 
+        typeof navigator.connection.type === 'string' ? 
+        navigator.connection.type : 'unknown';
+        
+      const effectiveType = navigator.connection && 
+        typeof navigator.connection.effectiveType === 'string' ? 
+        navigator.connection.effectiveType : '4g';
+        
+      const devicePixelRatio = typeof window.devicePixelRatio === 'number' ? 
+        window.devicePixelRatio : 1;
+        
+      const userAgent = typeof navigator.userAgent === 'string' ? 
+        navigator.userAgent : 'unknown';
+        
+      const platform = typeof navigator.platform === 'string' ? 
+        navigator.platform : 'unknown';
+      
       return {
-        cpuCores: navigator?.hardwareConcurrency || 4,
-        deviceMemory: navigator?.deviceMemory || 4,
-        maxTouchPoints: navigator?.maxTouchPoints || 0,
-        connectionType: (navigator?.connection?.type) || 'unknown',
-        effectiveType: (navigator?.connection?.effectiveType) || '4g',
-        devicePixelRatio: window?.devicePixelRatio || 1,
-        hardwareConcurrency: navigator?.hardwareConcurrency || 4,
-        userAgent: navigator?.userAgent || 'EcoScan/1.0.0',
-        platform: navigator?.platform || 'unknown'
+        cpuCores: hardwareConcurrency,
+        deviceMemory,
+        maxTouchPoints,
+        connectionType,
+        effectiveType,
+        devicePixelRatio,
+        hardwareConcurrency,
+        userAgent,
+        platform
       };
     } catch (error) {
-      console.warn('[PerformanceScaling] Error detecting device capabilities, using fallback:', error);
-      return fallbackCapabilities;
+      console.error('[PerformanceScaling] Error detecting device capabilities:', error);
+      
+      // Return safe defaults
+      return {
+        cpuCores: 2,
+        deviceMemory: 2,
+        maxTouchPoints: 0,
+        connectionType: 'unknown',
+        effectiveType: '4g',
+        devicePixelRatio: 1,
+        hardwareConcurrency: 2,
+        userAgent: 'unknown',
+        platform: 'unknown'
+      };
     }
   }
 
   /**
    * Select initial performance profile based on device capabilities
+   * with improved safety checks
    */
   private selectInitialProfile(): PerformanceProfile {
-    const { cpuCores, deviceMemory, userAgent } = this.deviceCapabilities;
-    
-    // Detect device class
-    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
-    const isLowEnd = cpuCores <= 2 || deviceMemory <= 2;
-    const isHighEnd = cpuCores >= 8 && deviceMemory >= 8;
-    
-    if (isMobile && isLowEnd) {
-      return this.getProfile('battery-saver');
-    } else if (isHighEnd) {
-      return this.getProfile('high-performance');
-    } else if (isMobile) {
-      return this.getProfile('mobile-optimized');
-    } else {
-      return this.getProfile('balanced');
+    try {
+      // Ensure deviceCapabilities exists and has required properties
+      if (!this.deviceCapabilities) {
+        console.warn('[PerformanceScaling] Device capabilities not available, using balanced profile');
+        return this.getProfile('balanced');
+      }
+      
+      const { cpuCores, deviceMemory, userAgent } = this.deviceCapabilities;
+      
+      if (typeof cpuCores !== 'number' || typeof deviceMemory !== 'number') {
+        console.warn('[PerformanceScaling] Invalid device capability values, using balanced profile');
+        return this.getProfile('balanced');
+      }
+      
+      // Detect device class with defensive coding
+      const isMobile = typeof userAgent === 'string' && 
+        /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+      const isLowEnd = cpuCores <= 2 || deviceMemory <= 2;
+      const isHighEnd = cpuCores >= 8 && deviceMemory >= 8;
+      
+      console.log('[PerformanceScaling] Device profile detection:', {
+        cpuCores,
+        deviceMemory, 
+        isMobile,
+        isLowEnd,
+        isHighEnd
+      });
+      
+      if (isMobile && isLowEnd) {
+        return this.getProfile('battery-saver');
+      } else if (isHighEnd) {
+        return this.getProfile('high-performance');
+      } else if (isMobile) {
+        return this.getProfile('mobile-optimized');
+      } else {
+        return this.getProfile('balanced');
+      }
+    } catch (error) {
+      console.error('[PerformanceScaling] Error selecting profile:', error);
+      return this.getProfile('balanced'); // Safe fallback
     }
   }
 
