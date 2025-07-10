@@ -1,91 +1,725 @@
 /**
- * Analytics and monitoring utilities for EcoScan
- * Tracks performance metrics, user behavior, and system health
+ * Advanced Analytics and Reporting System
+ * Tracks user behavior, environmental impact, and system performance
  */
 
-import { config } from '$lib/config';
+import { writable, derived } from 'svelte/store';
+import { isBrowser } from './browser.js';
+import type { Detection } from '../types/index.js';
 
 export interface AnalyticsEvent {
-  name: string;
-  properties?: Record<string, any>;
-  timestamp?: number;
-  sessionId?: string;
+  id: string;
+  type: 'detection' | 'interaction' | 'performance' | 'error' | 'conversion';
+  category: string;
+  action: string;
+  label?: string;
+  value?: number;
+  timestamp: number;
+  sessionId: string;
   userId?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface UserSession {
+  id: string;
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+  pageViews: number;
+  events: number;
+  detections: number;
+  errors: number;
+  browser: string;
+  device: string;
+  location?: {
+    country?: string;
+    city?: string;
+  };
+}
+
+export interface ImpactMetrics {
+  totalDetections: number;
+  recycledItems: number;
+  compostedItems: number;
+  correctDisposals: number;
+  estimatedCO2Saved: number;
+  estimatedWasteDiverted: number;
+  streakDays: number;
+  weeklyProgress: number[];
+  categoryBreakdown: Record<string, number>;
+  timeOfDayAnalysis: Record<string, number>;
 }
 
 export interface PerformanceMetrics {
-  // Core performance
+  averageDetectionTime: number;
+  cameraInitTime: number;
   modelLoadTime: number;
-  inferenceTime: number;
-  frameRate: number;
+  errorRate: number;
+  crashCount: number;
   memoryUsage: number;
+  batteryImpact: number;
+  networkUsage: number;
+}
+
+export interface InsightData {
+  insights: string[];
+  recommendations: string[];
+  trends: Array<{
+    metric: string;
+    change: number;
+    direction: 'up' | 'down' | 'stable';
+    significance: 'high' | 'medium' | 'low';
+  }>;
+  achievements: Array<{
+    id: string;
+    title: string;
+    description: string;
+    unlockedAt: number;
+    icon: string;
+  }>;
+}
+
+// Analytics stores
+export const analyticsEvents = writable<AnalyticsEvent[]>([]);
+export const currentSession = writable<UserSession | null>(null);
+export const impactMetrics = writable<ImpactMetrics>({
+  totalDetections: 0,
+  recycledItems: 0,
+  compostedItems: 0,
+  correctDisposals: 0,
+  estimatedCO2Saved: 0,
+  estimatedWasteDiverted: 0,
+  streakDays: 0,
+  weeklyProgress: [],
+  categoryBreakdown: {},
+  timeOfDayAnalysis: {}
+});
+export const performanceMetrics = writable<PerformanceMetrics>({
+  averageDetectionTime: 0,
+  cameraInitTime: 0,
+  modelLoadTime: 0,
+  errorRate: 0,
+  crashCount: 0,
+  memoryUsage: 0,
+  batteryImpact: 0,
+  networkUsage: 0
+});
+
+// Derived stores for insights
+export const weeklyImpact = derived(impactMetrics, ($metrics) => {
+  const thisWeek = $metrics.weeklyProgress.slice(-7);
+  const lastWeek = $metrics.weeklyProgress.slice(-14, -7);
   
-  // User interaction
-  detectionCount: number;
-  sessionDuration: number;
-  errorCount: number;
-  featureUsage: {
-    camera: number;
-    voice: number;
-    upload: number;
+  const thisWeekTotal = thisWeek.reduce((sum, day) => sum + day, 0);
+  const lastWeekTotal = lastWeek.reduce((sum, day) => sum + day, 0);
+  
+  return {
+    thisWeek: thisWeekTotal,
+    lastWeek: lastWeekTotal,
+    change: lastWeekTotal > 0 ? ((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100 : 0
   };
-  
-  // System health
-  batteryLevel?: number;
-  networkSpeed?: number;
-  deviceType: string;
-  browserInfo: string;
-}
+});
 
-export interface UserBehaviorMetrics {
-  // Engagement
-  sessionCount: number;
-  averageSessionTime: number;
-  bounceRate: number;
-  
-  // Feature adoption
-  voiceUsageRate: number;
-  cameraUsageRate: number;
-  uploadUsageRate: number;
-  
-  // Classification accuracy feedback
-  userCorrections: number;
-  confidenceRatings: number[];
-  
-  // Error patterns
-  commonErrors: string[];
-  errorRecoveryRate: number;
-}
+export const topCategories = derived(impactMetrics, ($metrics) => {
+  return Object.entries($metrics.categoryBreakdown)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 5)
+    .map(([category, count]) => ({ category, count }));
+});
 
-class AnalyticsManager {
+/**
+ * Advanced Analytics Engine
+ */
+export class AnalyticsEngine {
   private sessionId: string;
-  private userId: string;
-  private startTime: number;
-  private events: AnalyticsEvent[] = [];
-  private metrics: Partial<PerformanceMetrics> = {};
-  private isEnabled: boolean;
-  private batchSize = 10;
-  private flushInterval = 30000; // 30 seconds
-  private flushTimer?: NodeJS.Timeout;
+  private userId?: string;
+  private eventQueue: AnalyticsEvent[] = [];
+  private flushInterval: number | null = null;
+  private sessionStartTime: number;
+  private pageViews = 0;
+  private eventCount = 0;
+  private detectionCount = 0;
+  private errorCount = 0;
 
   constructor() {
     this.sessionId = this.generateSessionId();
-    this.userId = this.getUserId();
-    this.startTime = Date.now();
-    this.isEnabled = config.analytics.enabled;
+    this.sessionStartTime = Date.now();
     
-    if (this.isEnabled) {
-      this.initializeAnalytics();
+    if (isBrowser()) {
+      this.initialize();
     }
   }
 
+  /**
+   * Initialize analytics engine
+   */
+  private async initialize(): Promise<void> {
+    try {
+      console.log('📊 Initializing analytics engine...');
+      
+      // Load existing user ID or generate new one
+      this.userId = this.getOrCreateUserId();
+      
+      // Start session tracking
+      this.startSession();
+      
+      // Set up automatic event flushing
+      this.startEventFlushing();
+      
+      // Set up page visibility tracking
+      this.setupVisibilityTracking();
+      
+      // Set up error tracking
+      this.setupErrorTracking();
+      
+      // Load historical data
+      await this.loadHistoricalData();
+      
+      console.log('✅ Analytics engine initialized');
+      
+    } catch (error) {
+      console.error('❌ Failed to initialize analytics:', error);
+    }
+  }
+
+  /**
+   * Track analytics event
+   */
+  track(
+    type: AnalyticsEvent['type'],
+    category: string,
+    action: string,
+    label?: string,
+    value?: number,
+    metadata?: Record<string, any>
+  ): void {
+    const event: AnalyticsEvent = {
+      id: this.generateEventId(),
+      type,
+      category,
+      action,
+      label,
+      value,
+      timestamp: Date.now(),
+      sessionId: this.sessionId,
+      userId: this.userId,
+      metadata: {
+        ...metadata,
+        userAgent: navigator.userAgent,
+        url: window.location.href,
+        referrer: document.referrer
+      }
+    };
+
+    this.eventQueue.push(event);
+    this.eventCount++;
+
+    // Update reactive store
+    analyticsEvents.update(events => [...events.slice(-100), event]); // Keep last 100 events
+
+    console.log('📊 Analytics event tracked:', {
+      type,
+      category,
+      action,
+      label,
+      value
+    });
+
+    // Special handling for certain event types
+    if (type === 'detection') {
+      this.detectionCount++;
+      this.updateDetectionMetrics(event);
+    } else if (type === 'error') {
+      this.errorCount++;
+    }
+  }
+
+  /**
+   * Track detection event with environmental impact
+   */
+  trackDetection(detection: Detection, processingTime: number, method: 'camera' | 'upload' | 'voice' | 'text'): void {
+    this.track('detection', 'waste_classification', 'item_detected', detection.label, detection.confidence, {
+      category: detection.category,
+      processingTime,
+      method,
+      bbox: detection.bbox,
+      instructions: detection.instructions
+    });
+
+    // Update impact metrics
+    this.updateImpactMetrics(detection);
+  }
+
+  /**
+   * Track user interaction
+   */
+  trackInteraction(element: string, action: string, value?: number): void {
+    this.track('interaction', 'user_engagement', action, element, value, {
+      timestamp: Date.now(),
+      pageUrl: window.location.pathname
+    });
+  }
+
+  /**
+   * Track performance metrics
+   */
+  trackPerformance(metric: string, value: number, unit: string): void {
+    this.track('performance', 'app_performance', metric, unit, value, {
+      timestamp: Date.now(),
+      deviceMemory: (navigator as any).deviceMemory || 'unknown',
+      hardwareConcurrency: navigator.hardwareConcurrency || 'unknown'
+    });
+
+    // Update performance metrics store
+    this.updatePerformanceMetrics(metric, value);
+  }
+
+  /**
+   * Track conversion events
+   */
+  trackConversion(goal: string, value?: number): void {
+    this.track('conversion', 'goal_completion', goal, undefined, value, {
+      timestamp: Date.now(),
+      sessionDuration: Date.now() - this.sessionStartTime
+    });
+  }
+
+  /**
+   * Track error events
+   */
+  trackError(error: Error, context?: string): void {
+    this.track('error', 'application_error', error.name, error.message, undefined, {
+      stack: error.stack,
+      context,
+      timestamp: Date.now(),
+      url: window.location.href
+    });
+  }
+
+  /**
+   * Update detection metrics
+   */
+  private updateDetectionMetrics(event: AnalyticsEvent): void {
+    if (!event.metadata) return;
+
+    const category = event.metadata.category;
+    const hour = new Date().getHours();
+
+    impactMetrics.update(metrics => {
+      const updated = { ...metrics };
+      
+      updated.totalDetections++;
+      
+      if (category === 'recycle') {
+        updated.recycledItems++;
+        updated.estimatedCO2Saved += 2.3; // Average CO2 saved per recycled item
+      } else if (category === 'compost') {
+        updated.compostedItems++;
+        updated.estimatedCO2Saved += 1.1; // Average CO2 saved per composted item
+      }
+      
+      // Update category breakdown
+      updated.categoryBreakdown[category] = (updated.categoryBreakdown[category] || 0) + 1;
+      
+      // Update time of day analysis
+      const timeSlot = `${hour}:00`;
+      updated.timeOfDayAnalysis[timeSlot] = (updated.timeOfDayAnalysis[timeSlot] || 0) + 1;
+      
+      // Update weekly progress
+      const today = new Date().getDay();
+      if (updated.weeklyProgress.length < 7) {
+        updated.weeklyProgress = new Array(7).fill(0);
+      }
+      updated.weeklyProgress[today]++;
+      
+      return updated;
+    });
+  }
+
+  /**
+   * Update impact metrics based on detection
+   */
+  private updateImpactMetrics(detection: Detection): void {
+    impactMetrics.update(metrics => {
+      const updated = { ...metrics };
+      
+      // Calculate estimated waste diverted
+      const wasteWeights = {
+        'recycle': 0.5, // kg average
+        'compost': 0.3,
+        'trash': 0.2,
+        'hazardous': 0.1
+      };
+      
+      const weight = wasteWeights[detection.category as keyof typeof wasteWeights] || 0.2;
+      updated.estimatedWasteDiverted += weight;
+      
+      // Update streak tracking
+      const lastDetection = this.getLastDetectionDate();
+      const today = new Date();
+      
+      if (this.isSameDay(lastDetection, today) || this.isConsecutiveDay(lastDetection, today)) {
+        if (!this.isSameDay(lastDetection, today)) {
+          updated.streakDays++;
+        }
+      } else {
+        updated.streakDays = 1;
+      }
+      
+      this.saveLastDetectionDate(today);
+      
+      return updated;
+    });
+  }
+
+  /**
+   * Update performance metrics
+   */
+  private updatePerformanceMetrics(metric: string, value: number): void {
+    performanceMetrics.update(metrics => {
+      const updated = { ...metrics };
+      
+      switch (metric) {
+        case 'detectionTime':
+          updated.averageDetectionTime = (updated.averageDetectionTime + value) / 2;
+          break;
+        case 'cameraInit':
+          updated.cameraInitTime = value;
+          break;
+        case 'modelLoad':
+          updated.modelLoadTime = value;
+          break;
+        case 'memoryUsage':
+          updated.memoryUsage = value;
+          break;
+      }
+      
+      return updated;
+    });
+  }
+
+  /**
+   * Generate insights based on analytics data
+   */
+  generateInsights(): InsightData {
+    const insights: string[] = [];
+    const recommendations: string[] = [];
+    const trends: InsightData['trends'] = [];
+    const achievements: InsightData['achievements'] = [];
+
+    // Analyze detection patterns
+    impactMetrics.subscribe(metrics => {
+      // Most detected category
+      const topCategory = Object.entries(metrics.categoryBreakdown)
+        .sort(([,a], [,b]) => b - a)[0];
+      
+      if (topCategory) {
+        insights.push(`You classify ${topCategory[0]} items most frequently (${topCategory[1]} times)`);
+        
+        if (topCategory[0] === 'trash') {
+          recommendations.push('Consider reusable alternatives to reduce trash generation');
+        }
+      }
+
+      // Environmental impact
+      if (metrics.estimatedCO2Saved > 10) {
+        insights.push(`You've saved an estimated ${metrics.estimatedCO2Saved.toFixed(1)}kg of CO₂`);
+      }
+
+      // Streak analysis
+      if (metrics.streakDays >= 7) {
+        achievements.push({
+          id: 'week_streak',
+          title: 'Week Warrior',
+          description: `${metrics.streakDays} days of consistent eco-actions`,
+          unlockedAt: Date.now(),
+          icon: '🔥'
+        });
+      }
+
+      // Peak usage time
+      const peakHour = Object.entries(metrics.timeOfDayAnalysis)
+        .sort(([,a], [,b]) => b - a)[0];
+      
+      if (peakHour) {
+        insights.push(`You're most eco-active around ${peakHour[0]}`);
+      }
+    })();
+
+    return {
+      insights,
+      recommendations,
+      trends,
+      achievements
+    };
+  }
+
+  /**
+   * Generate comprehensive report
+   */
+  generateReport(timeframe: 'day' | 'week' | 'month' = 'week'): any {
+    const endTime = Date.now();
+    const startTime = endTime - this.getTimeframeMs(timeframe);
+    
+    const events = this.eventQueue.filter(event => 
+      event.timestamp >= startTime && event.timestamp <= endTime
+    );
+
+    const detectionEvents = events.filter(e => e.type === 'detection');
+    const interactionEvents = events.filter(e => e.type === 'interaction');
+    const performanceEvents = events.filter(e => e.type === 'performance');
+    const errorEvents = events.filter(e => e.type === 'error');
+
+    return {
+      timeframe,
+      period: { start: startTime, end: endTime },
+      summary: {
+        totalEvents: events.length,
+        detections: detectionEvents.length,
+        interactions: interactionEvents.length,
+        errors: errorEvents.length,
+        uniqueCategories: new Set(detectionEvents.map(e => e.metadata?.category)).size,
+        averageConfidence: detectionEvents.reduce((sum, e) => sum + (e.value || 0), 0) / detectionEvents.length
+      },
+      performance: {
+        averageDetectionTime: performanceEvents
+          .filter(e => e.action === 'detectionTime')
+          .reduce((sum, e) => sum + (e.value || 0), 0) / performanceEvents.length,
+        errorRate: errorEvents.length / events.length,
+        crashCount: errorEvents.filter(e => e.action === 'crash').length
+      },
+      environmental: this.calculateEnvironmentalImpact(detectionEvents),
+      insights: this.generateInsights()
+    };
+  }
+
+  /**
+   * Calculate environmental impact from events
+   */
+  private calculateEnvironmentalImpact(detectionEvents: AnalyticsEvent[]): any {
+    let co2Saved = 0;
+    let wasteDiverted = 0;
+    const categoryCount: Record<string, number> = {};
+
+    detectionEvents.forEach(event => {
+      const category = event.metadata?.category || 'unknown';
+      categoryCount[category] = (categoryCount[category] || 0) + 1;
+
+      // CO2 calculations
+      if (category === 'recycle') {
+        co2Saved += 2.3;
+        wasteDiverted += 0.5;
+      } else if (category === 'compost') {
+        co2Saved += 1.1;
+        wasteDiverted += 0.3;
+      }
+    });
+
+    return {
+      co2SavedKg: co2Saved,
+      wasteDivertedKg: wasteDiverted,
+      categoryBreakdown: categoryCount,
+      equivalencies: {
+        treesPlanted: Math.floor(co2Saved / 21), // 1 tree absorbs ~21kg CO2/year
+        milesNotDriven: Math.floor(co2Saved / 0.4), // 1 mile driving = ~0.4kg CO2
+        lightBulbHours: Math.floor(co2Saved * 120) // 1kg CO2 = ~120 hours of LED bulb
+      }
+    };
+  }
+
+  /**
+   * Start session tracking
+   */
+  private startSession(): void {
+    const session: UserSession = {
+      id: this.sessionId,
+      startTime: this.sessionStartTime,
+      pageViews: 1,
+      events: 0,
+      detections: 0,
+      errors: 0,
+      browser: this.getBrowserInfo(),
+      device: this.getDeviceInfo()
+    };
+
+    currentSession.set(session);
+    this.pageViews++;
+
+    console.log('📊 Session started:', session.id);
+  }
+
+  /**
+   * End current session
+   */
+  endSession(): void {
+    currentSession.update(session => {
+      if (session) {
+        const updated = {
+          ...session,
+          endTime: Date.now(),
+          duration: Date.now() - session.startTime,
+          events: this.eventCount,
+          detections: this.detectionCount,
+          errors: this.errorCount,
+          pageViews: this.pageViews
+        };
+
+        // Store session data
+        this.storeSessionData(updated);
+        
+        return updated;
+      }
+      return session;
+    });
+
+    console.log('📊 Session ended');
+  }
+
+  /**
+   * Setup automatic event flushing
+   */
+  private startEventFlushing(): void {
+    this.flushInterval = window.setInterval(() => {
+      this.flushEvents();
+    }, 30000); // Flush every 30 seconds
+  }
+
+  /**
+   * Flush events to storage/analytics service
+   */
+  private async flushEvents(): Promise<void> {
+    if (this.eventQueue.length === 0) return;
+
+    try {
+      // In a real implementation, this would send to analytics service
+      const eventsToFlush = [...this.eventQueue];
+      this.eventQueue = [];
+
+      // Store locally for offline access
+      this.storeEventsLocally(eventsToFlush);
+
+      console.log(`📊 Flushed ${eventsToFlush.length} analytics events`);
+
+    } catch (error) {
+      console.error('❌ Failed to flush analytics events:', error);
+      // Re-add events to queue on failure
+      this.eventQueue.unshift(...this.eventQueue);
+    }
+  }
+
+  /**
+   * Setup page visibility tracking
+   */
+  private setupVisibilityTracking(): void {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.track('interaction', 'page_visibility', 'hidden');
+      } else {
+        this.track('interaction', 'page_visibility', 'visible');
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      this.endSession();
+      this.flushEvents();
+    });
+  }
+
+  /**
+   * Setup global error tracking
+   */
+  private setupErrorTracking(): void {
+    window.addEventListener('error', (event) => {
+      this.trackError(event.error, 'global_error');
+    });
+
+    window.addEventListener('unhandledrejection', (event) => {
+      this.trackError(new Error(event.reason), 'unhandled_promise');
+    });
+  }
+
+  /**
+   * Load historical analytics data
+   */
+  private async loadHistoricalData(): Promise<void> {
+    try {
+      // Load from localStorage
+      const storedMetrics = localStorage.getItem('ecoscan-impact-metrics');
+      if (storedMetrics) {
+        const metrics = JSON.parse(storedMetrics);
+        impactMetrics.set(metrics);
+      }
+
+      const storedPerf = localStorage.getItem('ecoscan-performance-metrics');
+      if (storedPerf) {
+        const perf = JSON.parse(storedPerf);
+        performanceMetrics.set(perf);
+      }
+
+    } catch (error) {
+      console.warn('Failed to load historical analytics data:', error);
+    }
+  }
+
+  /**
+   * Store events locally
+   */
+  private storeEventsLocally(events: AnalyticsEvent[]): void {
+    try {
+      const existing = localStorage.getItem('ecoscan-analytics-events');
+      const existingEvents = existing ? JSON.parse(existing) : [];
+      
+      const allEvents = [...existingEvents, ...events];
+      
+      // Keep only last 1000 events
+      const recentEvents = allEvents.slice(-1000);
+      
+      localStorage.setItem('ecoscan-analytics-events', JSON.stringify(recentEvents));
+      
+      // Store metrics
+      impactMetrics.subscribe(metrics => {
+        localStorage.setItem('ecoscan-impact-metrics', JSON.stringify(metrics));
+      })();
+      
+      performanceMetrics.subscribe(perf => {
+        localStorage.setItem('ecoscan-performance-metrics', JSON.stringify(perf));
+      })();
+      
+    } catch (error) {
+      console.warn('Failed to store analytics events locally:', error);
+    }
+  }
+
+  /**
+   * Store session data
+   */
+  private storeSessionData(session: UserSession): void {
+    try {
+      const existing = localStorage.getItem('ecoscan-sessions');
+      const existingSessions = existing ? JSON.parse(existing) : [];
+      
+      const allSessions = [...existingSessions, session];
+      
+      // Keep only last 50 sessions
+      const recentSessions = allSessions.slice(-50);
+      
+      localStorage.setItem('ecoscan-sessions', JSON.stringify(recentSessions));
+      
+    } catch (error) {
+      console.warn('Failed to store session data:', error);
+    }
+  }
+
+  // Helper methods
   private generateSessionId(): string {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  private getUserId(): string {
-    if (typeof window === 'undefined') return 'server';
-    
+  private generateEventId(): string {
+    return `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private getOrCreateUserId(): string {
     let userId = localStorage.getItem('ecoscan-user-id');
     if (!userId) {
       userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -94,580 +728,113 @@ class AnalyticsManager {
     return userId;
   }
 
-  private initializeAnalytics(): void {
-    // Track page load performance
-    this.trackPageLoad();
-    
-    // Set up automatic flushing
-    this.startAutoFlush();
-    
-    // Track unload events
-    if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', () => {
-        this.flush();
-      });
-      
-      // Track visibility changes
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          this.trackEvent('session_pause');
-        } else {
-          this.trackEvent('session_resume');
-        }
-      });
+  private getBrowserInfo(): string {
+    const ua = navigator.userAgent;
+    if (ua.includes('Chrome')) return 'Chrome';
+    if (ua.includes('Firefox')) return 'Firefox';
+    if (ua.includes('Safari')) return 'Safari';
+    if (ua.includes('Edge')) return 'Edge';
+    return 'Unknown';
+  }
+
+  private getDeviceInfo(): string {
+    const ua = navigator.userAgent;
+    if (/Android/i.test(ua)) return 'Android';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+    if (/Windows/i.test(ua)) return 'Windows';
+    if (/Mac/i.test(ua)) return 'Mac';
+    if (/Linux/i.test(ua)) return 'Linux';
+    return 'Unknown';
+  }
+
+  private getTimeframeMs(timeframe: 'day' | 'week' | 'month'): number {
+    switch (timeframe) {
+      case 'day': return 24 * 60 * 60 * 1000;
+      case 'week': return 7 * 24 * 60 * 60 * 1000;
+      case 'month': return 30 * 24 * 60 * 60 * 1000;
     }
   }
 
-  private trackPageLoad(): void {
-    if (typeof window === 'undefined') return;
-    
-    const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
-    if (navigation) {
-      this.trackEvent('page_load', {
-        loadTime: navigation.loadEventEnd - navigation.loadEventStart,
-        domContentLoaded: navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
-        networkTime: navigation.responseEnd - navigation.requestStart,
-        renderTime: navigation.loadEventEnd - navigation.responseEnd
-      });
-    }
-  }
-
-  private startAutoFlush(): void {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-    }
-    
-    this.flushTimer = setInterval(() => {
-      this.flush();
-    }, this.flushInterval);
-  }
-
-  /**
-   * Track a custom event
-   */
-  trackEvent(name: string, properties?: Record<string, any>): void {
-    if (!this.isEnabled) return;
-
-    const event: AnalyticsEvent = {
-      name,
-      properties: {
-        ...properties,
-        sessionId: this.sessionId,
-        timestamp: Date.now(),
-        url: typeof window !== 'undefined' ? window.location.pathname : '',
-        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
-      },
-      sessionId: this.sessionId,
-      userId: this.userId,
-      timestamp: Date.now()
-    };
-
-    this.events.push(event);
-    
-    // Auto-flush if batch size reached
-    if (this.events.length >= this.batchSize) {
-      this.flush();
-    }
-  }
-
-  /**
-   * Track performance metrics
-   */
-  trackPerformance(metric: string, value: number, unit = 'ms'): void {
-    if (typeof value !== 'number' || isNaN(value)) {
-      console.warn(`Invalid metric value for ${metric}:`, value);
-      return;
-    }
-    // Clamp extreme values
-    if (metric === 'fps') {
-      if (value <= 0 || value > 120) {
-        console.warn('FPS metric out of range:', value);
-        return;
-      }
-    }
-    if (metric === 'inferenceTime') {
-      if (value < 0 || value > 2000) {
-        console.warn('Inference time metric out of range:', value);
-        return;
-      }
-    }
-    this.trackEvent('performance_metric', {
-      metric,
-      value,
-      unit,
-      timestamp: Date.now()
-    });
-
-         // Store for aggregation
-     (this.metrics as Record<string, any>)[metric] = value;
-  }
-
-  /**
-   * Track model inference performance
-   */
-  trackInference(inferenceTime: number, objectsDetected: number, confidence: number): void {
-    this.trackEvent('ml_inference', {
-      inferenceTime,
-      objectsDetected,
-      averageConfidence: confidence,
-      timestamp: Date.now()
-    });
-  }
-
-  /**
-   * Track user interaction with detection results
-   */
-  trackDetectionInteraction(detection: {
-    class: string;
-    category: string;
-    confidence: number;
-    action: 'view' | 'share' | 'learn_more' | 'correct';
-  }): void {
-    this.trackEvent('detection_interaction', {
-      objectClass: detection.class,
-      category: detection.category,
-      confidence: detection.confidence,
-      action: detection.action
-    });
-  }
-
-  /**
-   * Track errors and exceptions
-   */
-  trackError(error: Error, context?: string, severity: 'low' | 'medium' | 'high' = 'medium'): void {
-    this.trackEvent('error', {
-      message: error.message,
-      stack: error.stack,
-      context,
-      severity,
-      timestamp: Date.now()
-    });
-  }
-
-  /**
-   * Track feature usage
-   */
-  trackFeatureUsage(feature: 'camera' | 'voice' | 'upload' | 'qr_code', action: 'start' | 'success' | 'error'): void {
-    this.trackEvent('feature_usage', {
-      feature,
-      action,
-      timestamp: Date.now()
-    });
-  }
-
-  /**
-   * Track system information
-   */
-  trackSystemInfo(): void {
-    if (typeof window === 'undefined') return;
-
-    const systemInfo = {
-      // Device info
-      userAgent: navigator.userAgent,
-      platform: navigator.platform,
-      language: navigator.language,
-      cookieEnabled: navigator.cookieEnabled,
-      onLine: navigator.onLine,
-      
-      // Screen info
-      screenWidth: screen.width,
-      screenHeight: screen.height,
-      colorDepth: screen.colorDepth,
-      pixelRatio: window.devicePixelRatio,
-      
-      // Browser capabilities
-      webglSupported: this.checkWebGLSupport(),
-      webrtcSupported: this.checkWebRTCSupport(),
-      speechSupported: this.checkSpeechSupport(),
-      
-      // Performance info
-      hardwareConcurrency: navigator.hardwareConcurrency,
-      deviceMemory: (navigator as any).deviceMemory,
-      
-      // Battery info (if available)
-      ...(this.getBatteryInfo())
-    };
-
-    this.trackEvent('system_info', systemInfo);
-  }
-
-  private checkWebGLSupport(): boolean {
+  private getLastDetectionDate(): Date {
     try {
-      const canvas = document.createElement('canvas');
-      return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+      const stored = localStorage.getItem('ecoscan-last-detection');
+      return stored ? new Date(stored) : new Date(0);
     } catch {
-      return false;
+      return new Date(0);
     }
   }
 
-  private checkWebRTCSupport(): boolean {
-    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-  }
-
-  private checkSpeechSupport(): boolean {
-    return !!(window.SpeechRecognition || (window as any).webkitSpeechRecognition);
-  }
-
-  private getBatteryInfo(): Record<string, any> {
-    if ('getBattery' in navigator) {
-      (navigator as any).getBattery().then((battery: any) => {
-        this.trackEvent('battery_info', {
-          level: battery.level,
-          charging: battery.charging,
-          chargingTime: battery.chargingTime,
-          dischargingTime: battery.dischargingTime
-        });
-      });
-    }
-    return {};
-  }
-
-  /**
-   * Get current session metrics
-   */
-  getSessionMetrics(): PerformanceMetrics {
-    const sessionDuration = Date.now() - this.startTime;
-    
-    return {
-      modelLoadTime: this.metrics.modelLoadTime || 0,
-      inferenceTime: this.metrics.inferenceTime || 0,
-      frameRate: this.metrics.frameRate || 0,
-      memoryUsage: this.getMemoryUsage(),
-      detectionCount: this.getEventCount('ml_inference'),
-      sessionDuration,
-      errorCount: this.getEventCount('error'),
-      featureUsage: {
-        camera: this.getFeatureUsageCount('camera'),
-        voice: this.getFeatureUsageCount('voice'),
-        upload: this.getFeatureUsageCount('upload')
-      },
-      deviceType: this.getDeviceType(),
-      browserInfo: navigator.userAgent
-    };
-  }
-
-  private getMemoryUsage(): number {
-    if ('memory' in performance) {
-      return (performance as any).memory.usedJSHeapSize / 1024 / 1024; // MB
-    }
-    return 0;
-  }
-
-  private getEventCount(eventName: string): number {
-    return this.events.filter(event => event.name === eventName).length;
-  }
-
-  private getFeatureUsageCount(feature: string): number {
-    return this.events.filter(event => 
-      event.name === 'feature_usage' && 
-      event.properties?.feature === feature &&
-      event.properties?.action === 'success'
-    ).length;
-  }
-
-  private getDeviceType(): string {
-    const width = window.innerWidth;
-    const hasTouch = 'ontouchstart' in window;
-    
-    if (width <= 768 || hasTouch && width <= 1024) return 'mobile';
-    if (hasTouch && width > 768 && width <= 1024) return 'tablet';
-    return 'desktop';
-  }
-
-  /**
-   * Flush events to storage/analytics service
-   */
-  async flush(): Promise<void> {
-    if (this.events.length === 0) return;
-
-    const eventsToFlush = [...this.events];
-    this.events = [];
-
+  private saveLastDetectionDate(date: Date): void {
     try {
-      // Store locally for development
-      await this.storeLocally(eventsToFlush);
-      
-      // Send to analytics service (placeholder)
-      if (config.analytics.analyticsId) {
-        await this.sendToAnalyticsService(eventsToFlush);
-      }
+      localStorage.setItem('ecoscan-last-detection', date.toISOString());
     } catch (error) {
-      console.warn('Failed to flush analytics:', error);
-      // Put events back if failed
-      this.events.unshift(...eventsToFlush);
+      console.warn('Failed to save last detection date:', error);
     }
   }
 
-  private async storeLocally(events: AnalyticsEvent[]): Promise<void> {
-    if (typeof window === 'undefined') return;
-
-    try {
-      const existingData = JSON.parse(localStorage.getItem('ecoscan-analytics') || '[]');
-      const allEvents = [...existingData, ...events];
-      
-      // Keep only last 1000 events
-      const recentEvents = allEvents.slice(-1000);
-      
-      localStorage.setItem('ecoscan-analytics', JSON.stringify(recentEvents));
-    } catch (error) {
-      console.warn('Failed to store analytics locally:', error);
-    }
+  private isSameDay(date1: Date, date2: Date): boolean {
+    return date1.toDateString() === date2.toDateString();
   }
 
-  private async sendToAnalyticsService(events: AnalyticsEvent[]): Promise<void> {
-    // Placeholder for real analytics service integration
-    // In production, this would send to Google Analytics, Mixpanel, etc.
-    
-    const payload = {
-      sessionId: this.sessionId,
-      userId: this.userId,
-      events,
-      timestamp: Date.now()
-    };
-
-    // Example: Send to custom analytics endpoint
-    if (config.api.baseUrl) {
-      try {
-        await fetch(`${config.api.baseUrl}/analytics`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      } catch (error) {
-        console.warn('Failed to send to analytics service:', error);
-      }
-    }
+  private isConsecutiveDay(date1: Date, date2: Date): boolean {
+    const nextDay = new Date(date1);
+    nextDay.setDate(nextDay.getDate() + 1);
+    return this.isSameDay(nextDay, date2);
   }
 
   /**
-   * Get analytics summary for dashboard
-   */
-  getAnalyticsSummary(): {
-    totalEvents: number;
-    sessionDuration: number;
-    topEvents: Array<{ name: string; count: number }>;
-    errorRate: number;
-    performanceScore: number;
-  } {
-    const totalEvents = this.events.length;
-    const sessionDuration = Date.now() - this.startTime;
-    const errorCount = this.getEventCount('error');
-    
-    // Calculate top events
-    const eventCounts = this.events.reduce((acc, event) => {
-      acc[event.name] = (acc[event.name] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const topEvents = Object.entries(eventCounts)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 5)
-      .map(([name, count]) => ({ name, count }));
-    
-    // Calculate performance score (0-100)
-    const metrics = this.getSessionMetrics();
-    const performanceScore = this.calculatePerformanceScore(metrics);
-    
-    return {
-      totalEvents,
-      sessionDuration,
-      topEvents,
-      errorRate: totalEvents > 0 ? errorCount / totalEvents : 0,
-      performanceScore
-    };
-  }
-
-  private calculatePerformanceScore(metrics: PerformanceMetrics): number {
-    let score = 100;
-    
-    // Penalize slow model loading (target: <5s)
-    if (metrics.modelLoadTime > 5000) {
-      score -= Math.min(30, (metrics.modelLoadTime - 5000) / 1000 * 5);
-    }
-    
-    // Penalize slow inference (target: <100ms)
-    if (metrics.inferenceTime > 100) {
-      score -= Math.min(25, (metrics.inferenceTime - 100) / 10);
-    }
-    
-    // Penalize low frame rate (target: >15 FPS)
-    if (metrics.frameRate < 15) {
-      score -= Math.min(20, (15 - metrics.frameRate) * 2);
-    }
-    
-    // Penalize high memory usage (target: <200MB)
-    if (metrics.memoryUsage > 200) {
-      score -= Math.min(15, (metrics.memoryUsage - 200) / 50 * 5);
-    }
-    
-    // Penalize errors
-    score -= Math.min(10, metrics.errorCount * 2);
-    
-    return Math.max(0, Math.round(score));
-  }
-
-  /**
-   * Export analytics data for analysis
-   */
-  exportData(): {
-    session: {
-      id: string;
-      userId: string;
-      startTime: number;
-      duration: number;
-    };
-    events: AnalyticsEvent[];
-    metrics: PerformanceMetrics;
-    summary: ReturnType<typeof this.getAnalyticsSummary>;
-  } {
-    return {
-      session: {
-        id: this.sessionId,
-        userId: this.userId,
-        startTime: this.startTime,
-        duration: Date.now() - this.startTime
-      },
-      events: this.events,
-      metrics: this.getSessionMetrics(),
-      summary: this.getAnalyticsSummary()
-    };
-  }
-
-  /**
-   * Clear all analytics data
-   */
-  clearData(): void {
-    this.events = [];
-    this.metrics = {};
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('ecoscan-analytics');
-    }
-  }
-
-  /**
-   * Destroy analytics manager
+   * Clean up resources
    */
   destroy(): void {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+      this.flushInterval = null;
     }
-    this.flush();
+    
+    this.endSession();
+    this.flushEvents();
   }
 }
 
-// Global analytics instance
-export const analytics = new AnalyticsManager();
-
-// Convenience functions
-export const trackEvent = (name: string, properties?: Record<string, any>) => 
-  analytics.trackEvent(name, properties);
-
-export const trackPerformance = (metric: string, value: number, unit = 'ms') => 
-  analytics.trackPerformance(metric, value, unit);
-
-export const trackError = (error: Error, context?: string, severity: 'low' | 'medium' | 'high' = 'medium') => 
-  analytics.trackError(error, context, severity);
-
-export const trackFeatureUsage = (feature: 'camera' | 'voice' | 'upload' | 'qr_code', action: 'start' | 'success' | 'error') => 
-  analytics.trackFeatureUsage(feature, action);
-
-export const getSessionMetrics = () => analytics.getSessionMetrics();
-
-export const getAnalyticsSummary = () => analytics.getAnalyticsSummary();
+// Global analytics engine instance
+let globalAnalytics: AnalyticsEngine | null = null;
 
 /**
- * Initialize analytics tracking
+ * Get or create global analytics engine
  */
-export function initializeAnalytics(): void {
-  if (typeof window === 'undefined') return;
-
-  // Track initial system info
-  analytics.trackSystemInfo();
-  
-  // Track app initialization
-  analytics.trackEvent('app_init', {
-    version: config.app.version,
-    timestamp: Date.now()
-  });
-  
-  // Set up error tracking
-  window.addEventListener('error', (event) => {
-    analytics.trackError(event.error, 'global_error_handler');
-  });
-  
-  window.addEventListener('unhandledrejection', (event) => {
-    analytics.trackError(new Error(event.reason), 'unhandled_promise_rejection');
-  });
+export function getAnalyticsEngine(): AnalyticsEngine {
+  if (!globalAnalytics) {
+    globalAnalytics = new AnalyticsEngine();
+  }
+  return globalAnalytics;
 }
 
 /**
- * Performance monitoring utilities
+ * Quick access functions for analytics
  */
-export class PerformanceMonitor {
-  private measurements: Map<string, number> = new Map();
+export const analytics = {
+  track: (type: AnalyticsEvent['type'], category: string, action: string, label?: string, value?: number, metadata?: Record<string, any>) =>
+    getAnalyticsEngine().track(type, category, action, label, value, metadata),
   
-  startMeasurement(name: string): void {
-    this.measurements.set(name, performance.now());
-  }
+  trackDetection: (detection: Detection, processingTime: number, method: 'camera' | 'upload' | 'voice' | 'text') =>
+    getAnalyticsEngine().trackDetection(detection, processingTime, method),
   
-  endMeasurement(name: string): number {
-    const startTime = this.measurements.get(name);
-    if (!startTime) {
-      console.warn(`No start time found for measurement: ${name}`);
-      return 0;
-    }
-    
-    const duration = performance.now() - startTime;
-    this.measurements.delete(name);
-    
-    // Track the performance metric
-    trackPerformance(name, duration);
-    
-    return duration;
-  }
+  trackInteraction: (element: string, action: string, value?: number) =>
+    getAnalyticsEngine().trackInteraction(element, action, value),
   
-  measureAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
-    this.startMeasurement(name);
-    return fn().finally(() => {
-      this.endMeasurement(name);
-    });
-  }
+  trackPerformance: (metric: string, value: number, unit: string) =>
+    getAnalyticsEngine().trackPerformance(metric, value, unit),
   
-  measureSync<T>(name: string, fn: () => T): T {
-    this.startMeasurement(name);
-    try {
-      return fn();
-    } finally {
-      this.endMeasurement(name);
-    }
-  }
-}
-
-export const performanceMonitor = new PerformanceMonitor();
-
-export function recordPerformanceMetric(name: string, value: number) {
-  if (typeof value !== 'number' || isNaN(value)) {
-    console.warn(`Invalid metric value for ${name}:`, value);
-    return;
-  }
-  // Clamp extreme values
-  if (name === 'fps') {
-    if (value <= 0 || value > 120) {
-      console.warn('FPS metric out of range:', value);
-      return;
-    }
-  }
-  if (name === 'inferenceTime') {
-    if (value < 0 || value > 2000) {
-      console.warn('Inference time metric out of range:', value);
-      return;
-    }
-  }
-  // ... existing code ...
-}
-
-export function isMetricsSupported(): boolean {
-  return typeof window !== 'undefined' && 'performance' in window && 'now' in window.performance;
-} 
+  trackConversion: (goal: string, value?: number) =>
+    getAnalyticsEngine().trackConversion(goal, value),
+  
+  trackError: (error: Error, context?: string) =>
+    getAnalyticsEngine().trackError(error, context),
+  
+  generateReport: (timeframe?: 'day' | 'week' | 'month') =>
+    getAnalyticsEngine().generateReport(timeframe),
+  
+  generateInsights: () => getAnalyticsEngine().generateInsights(),
+  
+  getEngine: () => getAnalyticsEngine()
+}; 
