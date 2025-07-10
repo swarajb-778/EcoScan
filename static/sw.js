@@ -3,7 +3,7 @@
  * Advanced caching and offline functionality
  */
 
-const CACHE_NAME = 'ecoscan-v1';
+const CACHE_NAME = 'ecoscan-v1.3';
 const API_CACHE = 'ecoscan-api-v1';
 const MODELS_CACHE = 'ecoscan-models-v1';
 const IMAGES_CACHE = 'ecoscan-images-v1';
@@ -28,7 +28,7 @@ const API_ENDPOINTS = [
 
 // Model files to cache
 const MODEL_FILES = [
-  '/models/waste-detector.onnx',
+  '/models/yolov8n.onnx',
   '/models/classifier.json'
 ];
 

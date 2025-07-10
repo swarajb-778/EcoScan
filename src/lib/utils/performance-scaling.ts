@@ -3,6 +3,8 @@
  * Monitors device capabilities and adjusts performance dynamically
  */
 
+import { browser } from '$app/environment';
+
 export interface DeviceCapabilities {
   cpuCores: number;
   deviceMemory: number; // GB
@@ -92,7 +94,9 @@ class PerformanceScaling {
       this.thermalState = { state: 'nominal', throttlingActive: false, timestamp: Date.now() };
       this.currentProfile = this.selectInitialProfile();
       
-      this.initializeMonitoring();
+      if (browser) {
+        this.initializeMonitoring();
+      }
       console.log('[PerformanceScaling] Initialized with profile:', this.currentProfile.name);
     } catch (error) {
       console.error('[PerformanceScaling] Error during initialization:', error);
@@ -781,5 +785,73 @@ class PerformanceScaling {
   }
 }
 
-export const performanceScaling = new PerformanceScaling();
+let performanceScaling: PerformanceScaling;
+
+if (browser) {
+  performanceScaling = new PerformanceScaling();
+} else {
+  // Create a mock/dummy version for SSR
+  const balancedProfile = {
+    name: 'Balanced',
+    mlModelSize: 'small' as const,
+    inferenceFrequency: 20,
+    imageResolution: { width: 640, height: 480 },
+    qualitySettings: {
+      enableGPU: true,
+      useWebGL: true,
+      enableMultithreading: true,
+      enableOptimizations: true
+    },
+    uiSettings: {
+      animationsEnabled: true,
+      reducedMotion: false,
+      simplifiedUI: false,
+      backgroundProcessing: true
+    }
+  };
+
+  performanceScaling = {
+    getDeviceCapabilities: () => ({
+      cpuCores: 2,
+      deviceMemory: 2,
+      maxTouchPoints: 0,
+      connectionType: 'unknown',
+      effectiveType: '4g',
+      devicePixelRatio: 1,
+      hardwareConcurrency: 2,
+      userAgent: 'unknown',
+      platform: 'unknown'
+    }),
+    getCurrentProfile: () => balancedProfile,
+    getThermalState: () => ({ state: 'nominal', throttlingActive: false, timestamp: Date.now() }),
+    getBatteryInfo: () => null,
+    getPerformanceMetrics: () => [],
+    // Add no-op methods for other public functions to prevent errors during SSR
+    switchProfile: () => {},
+    forceProfile: () => {},
+    setCallbacks: () => {},
+    stopMonitoring: () => {},
+    generatePerformanceReport: () => ({
+      deviceInfo: {
+        cpuCores: 2,
+        deviceMemory: 2,
+        maxTouchPoints: 0,
+        connectionType: 'unknown',
+        effectiveType: '4g',
+        devicePixelRatio: 1,
+        hardwareConcurrency: 2,
+        userAgent: 'unknown',
+        platform: 'unknown'
+      },
+      currentProfile: balancedProfile,
+      thermalState: { state: 'nominal', throttlingActive: false, timestamp: Date.now() },
+      batteryInfo: null,
+      averageMetrics: { fps: 0, memoryUsage: 0, cpuUsage: 0 },
+      recommendations: []
+    })
+  } as unknown as PerformanceScaling;
+}
+
+
+export { performanceScaling };
 export default PerformanceScaling; 
