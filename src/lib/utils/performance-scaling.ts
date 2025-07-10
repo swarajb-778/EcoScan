@@ -3,6 +3,8 @@
  * Monitors device capabilities and adjusts performance dynamically
  */
 
+import { isBrowser } from './browser.js';
+
 export interface DeviceCapabilities {
   cpuCores: number;
   deviceMemory: number; // GB
@@ -84,32 +86,61 @@ class PerformanceScaling {
   private onMetricsUpdateCallback: ((metrics: PerformanceMetrics) => void) | null = null;
   
   constructor() {
+    // Safe initialization with browser detection
     this.deviceCapabilities = this.detectDeviceCapabilities();
     this.thermalState = { state: 'nominal', throttlingActive: false, timestamp: Date.now() };
     this.currentProfile = this.selectInitialProfile();
     
-    this.initializeMonitoring();
-    console.log('[PerformanceScaling] Initialized with profile:', this.currentProfile.name);
+    // Only start monitoring in browser environment
+    if (isBrowser()) {
+      this.initializeMonitoring();
+      console.log('[PerformanceScaling] Initialized with profile:', this.currentProfile.name);
+    } else {
+      console.log('[PerformanceScaling] Initialized in non-browser environment with profile:', this.currentProfile.name);
+    }
   }
 
   /**
-   * Detect device capabilities
+   * Detect device capabilities with proper fallbacks
    */
   private detectDeviceCapabilities(): DeviceCapabilities {
-    const navigator = window.navigator as any;
-    const screen = window.screen;
-    
-    return {
-      cpuCores: navigator.hardwareConcurrency || 2,
-      deviceMemory: navigator.deviceMemory || 2,
-      maxTouchPoints: navigator.maxTouchPoints || 0,
-      connectionType: (navigator.connection?.type) || 'unknown',
-      effectiveType: (navigator.connection?.effectiveType) || '4g',
-      devicePixelRatio: window.devicePixelRatio || 1,
-      hardwareConcurrency: navigator.hardwareConcurrency || 2,
-      userAgent: navigator.userAgent,
-      platform: navigator.platform
+    // Fallback capabilities for non-browser environments
+    const fallbackCapabilities: DeviceCapabilities = {
+      cpuCores: 4,
+      deviceMemory: 4,
+      maxTouchPoints: 0,
+      connectionType: 'unknown',
+      effectiveType: '4g',
+      devicePixelRatio: 1,
+      hardwareConcurrency: 4,
+      userAgent: 'EcoScan/1.0.0',
+      platform: 'unknown'
     };
+
+    // Return fallback if not in browser
+    if (!isBrowser()) {
+      return fallbackCapabilities;
+    }
+
+    try {
+      const navigator = window.navigator as any;
+      const screen = window.screen;
+      
+      return {
+        cpuCores: navigator?.hardwareConcurrency || 4,
+        deviceMemory: navigator?.deviceMemory || 4,
+        maxTouchPoints: navigator?.maxTouchPoints || 0,
+        connectionType: (navigator?.connection?.type) || 'unknown',
+        effectiveType: (navigator?.connection?.effectiveType) || '4g',
+        devicePixelRatio: window?.devicePixelRatio || 1,
+        hardwareConcurrency: navigator?.hardwareConcurrency || 4,
+        userAgent: navigator?.userAgent || 'EcoScan/1.0.0',
+        platform: navigator?.platform || 'unknown'
+      };
+    } catch (error) {
+      console.warn('[PerformanceScaling] Error detecting device capabilities, using fallback:', error);
+      return fallbackCapabilities;
+    }
   }
 
   /**
