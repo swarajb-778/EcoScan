@@ -56,9 +56,9 @@ export class ObjectDetector {
       expectedSize: 12 * 1024 * 1024, // 12MB for YOLOv8n
       version: '1.0.0',
       fallbackModels: [
-        '/models/yolov8n-fallback.onnx',
-        '/models/yolov8s-lite.onnx',
-        '/models/basic-detector.onnx'
+        // '/models/yolov8n-fallback.onnx',
+        // '/models/yolov8s-lite.onnx',
+        // '/models/basic-detector.onnx'
       ]
     };
 
