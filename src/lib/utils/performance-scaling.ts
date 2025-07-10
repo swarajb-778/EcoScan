@@ -305,11 +305,16 @@ class PerformanceScaling {
    * Start thermal state monitoring
    */
   private startThermalMonitoring(): void {
-    // Modern browsers with thermal API
+    // Modern browsers with thermal API (experimental)
     if ('devicethermalstate' in navigator) {
-      navigator.addEventListener('devicethermalstatechange', (event: any) => {
-        this.updateThermalState(event.state);
-      });
+      // Note: This API is experimental and may not be available
+      try {
+        (navigator as any).addEventListener?.('devicethermalstatechange', (event: any) => {
+          this.updateThermalState(event.state);
+        });
+      } catch (error) {
+        console.warn('[PerformanceScaling] Thermal monitoring not available:', error);
+      }
     }
     
     // Fallback: CPU usage estimation
