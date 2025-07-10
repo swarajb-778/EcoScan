@@ -121,7 +121,7 @@ export class ProgressiveModelLoader {
       const acceptRanges = headResponse.headers.get('accept-ranges');
       if (acceptRanges !== 'bytes') {
         console.warn('Server does not support range requests, falling back to single download');
-        return this.fallbackToSingleDownload(modelUrl);
+        throw new Error('Range requests not supported - fallback to single download');
       }
       
       // Calculate optimal chunk configuration

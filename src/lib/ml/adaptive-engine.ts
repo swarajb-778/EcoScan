@@ -167,7 +167,7 @@ export class AdaptiveInferenceEngine {
         webgl: !!canvas.getContext('webgl'),
         webgl2: !!canvas.getContext('webgl2'),
         webasm: typeof WebAssembly !== 'undefined',
-        webnn: navigator && 'ml' in navigator
+        webnn: !!(navigator && 'ml' in navigator)
       };
     }
     

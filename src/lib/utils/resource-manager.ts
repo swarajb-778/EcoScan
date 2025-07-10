@@ -258,7 +258,7 @@ export class AdvancedResourceManager {
     }
   }
 
-  private async performCleanup(): void {
+  private async performCleanup(): Promise<void> {
     const now = Date.now();
     const toCleanup: string[] = [];
     
