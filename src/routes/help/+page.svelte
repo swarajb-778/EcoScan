@@ -3,7 +3,7 @@
   import { trackEvent } from '$lib/utils/analytics';
 
   onMount(() => {
-    trackEvent('page_view', { page: 'help' });
+    trackEvent('interaction', 'page_view', 'help');
   });
 
   let expandedFaq = new Set();
@@ -15,7 +15,7 @@
       expandedFaq.add(index);
     }
     expandedFaq = new Set(expandedFaq);
-    trackEvent('faq_toggle', { index, expanded: expandedFaq.has(index) });
+    trackEvent('interaction', 'faq_toggle', `index_${index}`, undefined, undefined, { expanded: expandedFaq.has(index) });
   }
 
   const faqs = [
@@ -394,7 +394,7 @@
       <a 
         href="mailto:support@ecoscan.app" 
         class="bg-white text-blue-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-        on:click={() => trackEvent('support_contact', { method: 'email' })}
+        on:click={() => trackEvent('interaction', 'support_contact', 'email')}
       >
         📧 Email Support
       </a>
@@ -403,7 +403,7 @@
         target="_blank"
         rel="noopener noreferrer"
         class="bg-blue-400 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-300 transition-colors"
-        on:click={() => trackEvent('support_contact', { method: 'github' })}
+        on:click={() => trackEvent('interaction', 'support_contact', 'github')}
       >
         🐛 Report Issue
       </a>
