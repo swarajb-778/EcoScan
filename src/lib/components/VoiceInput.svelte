@@ -63,62 +63,65 @@
     // Initialize speech recognition
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    // Check if selected language is supported
-    const supportedLangs = ['en-US', 'en-GB', 'es-ES', 'fr-FR', 'de-DE', 'it-IT', 'zh-CN', 'ja-JP'];
-    if (!supportedLangs.includes(recognition.lang)) {
-      setError('Selected language is not supported for speech recognition. Defaulting to English.');
+    
+    if (recognition) {
+      recognition.continuous = false;
+      recognition.interimResults = true;
       recognition.lang = 'en-US';
+
+      // Check if selected language is supported
+      const supportedLangs = ['en-US', 'en-GB', 'es-ES', 'fr-FR', 'de-DE', 'it-IT', 'zh-CN', 'ja-JP'];
+      if (!supportedLangs.includes(recognition.lang)) {
+        setError('Selected language is not supported for speech recognition. Defaulting to English.');
+        recognition.lang = 'en-US';
+      }
+
+      recognition.onstart = () => {
+        isListening.set(true);
+        console.log('🎤 Voice recognition started');
+      };
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript.length < 2) {
+          setError('Utterance too short. Please speak a complete item name.');
+          return;
+        }
+        if (transcript.length > 100) {
+          setError('Utterance too long. Please keep your description concise.');
+          return;
+        }
+        lastTranscript.set(transcript);
+        
+        // If result is final, classify it
+        if (event.results[event.results.length - 1].isFinal) {
+          classifyVoiceInput(transcript);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        setError('Speech-to-text error: ' + event.error);
+        isListening.set(false);
+      };
+
+      recognition.onend = () => {
+        isListening.set(false);
+        console.log('🎤 Voice recognition ended');
+      };
+
+      recognition.onspeechend = () => {
+        if (!$lastTranscript) {
+          setError('No speech detected. Please try speaking more clearly.');
+        }
+      };
+
+      recognition.onnomatch = () => {
+        setError('Could not recognize speech. Try again or use text input.');
+      };
     }
-
-    recognition.onstart = () => {
-      isListening.set(true);
-      console.log('🎤 Voice recognition started');
-    };
-
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      if (transcript.length < 2) {
-        setError('Utterance too short. Please speak a complete item name.');
-        return;
-      }
-      if (transcript.length > 100) {
-        setError('Utterance too long. Please keep your description concise.');
-        return;
-      }
-      lastTranscript.set(transcript);
-      
-      // If result is final, classify it
-      if (event.results[event.results.length - 1].isFinal) {
-        classifyVoiceInput(transcript);
-      }
-    };
-
-    recognition.onerror = (event) => {
-      setError('Speech-to-text error: ' + event.error);
-      isListening.set(false);
-    };
-
-    recognition.onend = () => {
-      isListening.set(false);
-      console.log('🎤 Voice recognition ended');
-    };
-
-    recognition.onspeechend = () => {
-      if (!$lastTranscript) {
-        setError('No speech detected. Please try speaking more clearly.');
-      }
-    };
-
-    recognition.onnomatch = () => {
-      setError('Could not recognize speech. Try again or use text input.');
-    };
   }
 
   async function initializeClassifier() {
@@ -151,7 +154,9 @@
     lastTranscript.set('');
     
     try {
-      recognition.start();
+      if (recognition) {
+        recognition.start();
+      }
     } catch (error) {
       console.error('Failed to start recognition:', error);
       setError('Failed to start voice recognition');
