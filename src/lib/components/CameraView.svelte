@@ -34,6 +34,12 @@
   let lastFrameTime = 0;
   let frameCount = 0;
   let mountStartTime = 0;
+  
+  // Capture functionality state
+  let capturedImage: string | null = null;
+  let isCapturing = false;
+  let capturedDetections: Detection[] = [];
+  let showCapturedResult = false;
 
   // Local component state for SSR safety
   let localIsLoading = false;
@@ -999,16 +1005,16 @@
 
   // Handle fallback detection results
   function handleFallbackDetection(event: CustomEvent<{detections: Detection[], method: string}>) {
-    const { detections, method } = event.detail;
+    const { detections: fallbackDetections, method } = event.detail;
     
-    console.log(`✅ Fallback detection successful using ${method}:`, detections);
+    console.log(`✅ Fallback detection successful using ${method}:`, fallbackDetections);
     
     // Update detections store with fallback results
-    detections.set(detections);
+    detections.set(fallbackDetections);
     
     // Record fallback usage for analytics
     perf.record('fallbackDetectionUsed', 1, 'count', 'ml');
-    perf.record('fallbackMethod', this.mapMethodToScore(method), 'score', 'ml');
+    perf.record('fallbackMethod', mapMethodToScore(method), 'score', 'ml');
     
     // Show success message
     setSuccess(`Successfully classified using ${method} input`);
@@ -1034,7 +1040,7 @@
     const { isLoading, method } = event.detail;
     
     if (isLoading) {
-      setLoadingState(true, 'fallback', 0, `Processing ${method} input...`);
+      setLoadingState(true, 'processing', 0, `Processing ${method} input...`);
     } else {
       setLoadingState(false);
     }
@@ -1049,6 +1055,149 @@
       'clipboard': 4
     };
     return scores[method as keyof typeof scores] || 1;
+  }
+
+  // Capture button functionality
+  async function capturePhoto() {
+    if (!isBrowser() || !videoElement || !canvasElement || isCapturing) return;
+    
+    isCapturing = true;
+    console.log('📸 Capturing photo for analysis...');
+    
+    try {
+      // Capture current frame from video
+      perf.start('photoCapture');
+      const ctx = canvasElement.getContext('2d');
+      if (!ctx) throw new Error('Canvas context not available');
+      
+      // Draw current video frame to canvas
+      ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+      
+      // Get image data as base64
+      capturedImage = canvasElement.toDataURL('image/jpeg', 0.9);
+      const captureTime = perf.end('photoCapture', 'ui');
+      
+      console.log(`📸 Photo captured in ${captureTime.toFixed(0)}ms`);
+      
+      // Process the captured image for detection
+      await processCapturedImage();
+      
+      // Show captured result
+      showCapturedResult = true;
+      
+      // Add visual feedback
+      showCaptureFlash();
+      
+    } catch (error) {
+      console.error('❌ Capture failed:', error);
+      setError(`Photo capture failed: ${error}`);
+    } finally {
+      isCapturing = false;
+    }
+  }
+
+  // Process captured image for object detection
+  async function processCapturedImage() {
+    if (!capturedImage || !detector) return;
+    
+    console.log('🔍 Processing captured image...');
+    perf.start('capturedImageProcessing');
+    
+    try {
+      // Get image data from captured image
+      const img = new Image();
+      img.src = capturedImage;
+      
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
+      
+      // Create temporary canvas for processing
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = img.width;
+      tempCanvas.height = img.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) throw new Error('Temporary canvas context not available');
+      
+      // Draw image to temporary canvas
+      tempCtx.drawImage(img, 0, 0);
+      
+      // Get image data for detection
+      const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+      
+      // Run object detection
+      const detectedObjects = await detector.detect(imageData);
+      
+      // Enhance detections with classification
+      if (classifier) {
+        capturedDetections = detectedObjects.map(detection => {
+          const classification = classifier!.classify(detection.class);
+          return {
+            ...detection,
+            category: classification?.category || detection.category,
+            confidence: Math.min(detection.confidence, classification?.confidence || detection.confidence)
+          };
+        });
+      } else {
+        capturedDetections = detectedObjects;
+      }
+      
+      const processingTime = perf.end('capturedImageProcessing', 'ml');
+      console.log(`🔍 Captured image processed in ${processingTime.toFixed(0)}ms, found ${capturedDetections.length} objects`);
+      
+      // Update performance metrics
+      updatePerformanceMetric('inferenceTime', processingTime);
+      
+    } catch (error) {
+      console.error('❌ Captured image processing failed:', error);
+      setError(`Image processing failed: ${error}`);
+      capturedDetections = [];
+    }
+  }
+
+  // Show capture flash effect
+  function showCaptureFlash() {
+    if (!isBrowser()) return;
+    
+    const flash = document.createElement('div');
+    flash.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: white;
+      opacity: 0.8;
+      z-index: 9999;
+      pointer-events: none;
+      transition: opacity 0.1s ease-out;
+    `;
+    
+    document.body.appendChild(flash);
+    
+    setTimeout(() => {
+      flash.style.opacity = '0';
+      setTimeout(() => {
+        document.body.removeChild(flash);
+      }, 100);
+    }, 50);
+  }
+
+  // Close captured result view
+  function closeCapturedResult() {
+    showCapturedResult = false;
+    capturedImage = null;
+    capturedDetections = [];
+  }
+
+  // Save captured image
+  function saveCapturedImage() {
+    if (!capturedImage) return;
+    
+    const link = document.createElement('a');
+    link.download = `ecoscan-capture-${Date.now()}.jpg`;
+    link.href = capturedImage;
+    link.click();
   }
 </script>
 
@@ -1202,12 +1351,36 @@
     </div>
   {/if}
 
+  <!-- Capture Button -->
+  {#if browserPermissionsGranted && !browserIsLoading && !showCapturedResult}
+    <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2">
+      <button 
+        class="w-16 h-16 bg-white rounded-full shadow-lg flex items-center justify-center border-4 border-gray-300 hover:border-green-500 transition-all duration-200 transform hover:scale-105"
+        class:bg-red-500={isCapturing}
+        class:border-red-500={isCapturing}
+        on:click={capturePhoto}
+        disabled={isCapturing}
+        aria-label="Capture photo for analysis"
+      >
+        {#if isCapturing}
+          <div class="w-8 h-8 bg-white rounded animate-pulse"></div>
+        {:else}
+          <svg class="w-8 h-8 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
+        {/if}
+      </button>
+    </div>
+  {/if}
+
   <!-- Instructions overlay -->
-  {#if browserPermissionsGranted && !browserIsLoading}
+  {#if browserPermissionsGranted && !browserIsLoading && !showCapturedResult}
     <div class="absolute bottom-4 left-4 right-4 bg-black bg-opacity-70 text-white p-4 rounded-lg">
       <p class="text-sm">
         🎯 Point your camera at waste items to classify them.<br>
-        📱 Tap on detected objects for disposal instructions.
+        📱 Tap on detected objects for disposal instructions.<br>
+        📸 Press the capture button to take a photo for detailed analysis.
       </p>
     </div>
   {/if}
@@ -1239,6 +1412,114 @@
     </div>
   {/if}
 </div>
+
+<!-- Captured Photo Result Modal -->
+{#if showCapturedResult && capturedImage}
+  <div class="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-6 py-4 border-b flex items-center justify-between">
+        <div>
+          <h3 class="text-xl font-semibold text-gray-800">Captured Photo Analysis</h3>
+          <p class="text-sm text-gray-600">{capturedDetections.length} item{capturedDetections.length !== 1 ? 's' : ''} detected</p>
+        </div>
+        <div class="flex space-x-2">
+          <button 
+            on:click={saveCapturedImage}
+            class="btn btn-secondary bg-gray-200 hover:bg-gray-300 text-gray-700"
+            aria-label="Save captured image"
+          >
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            Save
+          </button>
+          <button 
+            on:click={closeCapturedResult}
+            class="btn btn-error bg-red-500 hover:bg-red-600 text-white"
+            aria-label="Close captured result"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="p-6 overflow-y-auto max-h-[70vh]">
+        <!-- Image Display -->
+        <div class="relative mb-6">
+          <img 
+            src={capturedImage} 
+            alt="Captured for analysis" 
+            class="w-full h-auto max-h-96 object-contain rounded-lg border"
+          />
+          
+          <!-- Detection overlays would go here if needed -->
+        </div>
+
+        <!-- Detection Results -->
+        {#if capturedDetections.length > 0}
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {#each capturedDetections as detection, index}
+              <div class="bg-gray-50 rounded-xl p-4 border hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-3">
+                  <span class="text-2xl">
+                    {detection.category === 'recycle' ? '♻️' : detection.category === 'compost' ? '🌱' : '🗑️'}
+                  </span>
+                  <span class="text-sm text-gray-500 bg-white px-2 py-1 rounded">
+                    {(detection.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+                
+                <h4 class="font-semibold text-gray-800 capitalize mb-1">{detection.label}</h4>
+                <p class="text-sm text-gray-600 capitalize mb-2">{detection.category}</p>
+                
+                {#if detection.instructions}
+                  <p class="text-xs text-gray-700 bg-white p-2 rounded">{detection.instructions}</p>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="text-center py-8">
+            <span class="text-4xl mb-3 block">🤔</span>
+            <h4 class="text-lg font-semibold mb-2 text-gray-800">No Items Detected</h4>
+            <p class="text-gray-600 text-sm">
+              The captured image didn't contain any recognizable waste items.<br>
+              Try capturing again with better lighting or closer to objects.
+            </p>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="bg-gray-50 px-6 py-4 border-t flex justify-between">
+        <button 
+          on:click={closeCapturedResult}
+          class="btn btn-secondary bg-gray-200 hover:bg-gray-300 text-gray-700"
+        >
+          Back to Camera
+        </button>
+        
+        <div class="flex space-x-2">
+          <button 
+            on:click={capturePhoto}
+            class="btn btn-primary bg-green-500 hover:bg-green-600 text-white"
+            disabled={isCapturing}
+          >
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+            Capture Another
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .loading-spinner {
