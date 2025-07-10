@@ -742,18 +742,23 @@
         // Use offline detection
         console.log('📴 Performing offline detection...');
         perf.start('offlineDetection');
-        detectedObjects = await offline.detect(imageDataUrl);
+        const offlineManager = getOfflineManager();
+        detectedObjects = await offlineManager.detectOffline(imageDataUrl);
         const offlineTime = perf.end('offlineDetection', 'ml');
         
         // Store detection offline for later sync
-        await offline.store(imageDataUrl, detectedObjects);
+        await offlineManager.storeDetectionOffline(imageDataUrl, detectedObjects);
         
         console.log(`🤖 Offline detection completed in ${offlineTime.toFixed(1)}ms`);
         
       } else {
         // Use online detection
         perf.start('onlineDetection');
-        detectedObjects = await detector.detect(ctx.getImageData(0, 0, canvasElement.width, canvasElement.height));
+        if (detector) {
+          detectedObjects = await detector.detect(ctx.getImageData(0, 0, canvasElement.width, canvasElement.height));
+        } else {
+          throw new Error('Detector not initialized');
+        }
         const detectionTime = perf.end('onlineDetection', 'ml');
         
         // Record inference time
@@ -792,7 +797,8 @@
         console.log('🔄 Falling back to offline detection...');
         try {
           const imageDataUrl = canvasElement.toDataURL('image/jpeg', 0.8);
-          const fallbackDetections = await offline.detect(imageDataUrl);
+          const offlineManager = getOfflineManager();
+          const fallbackDetections = await offlineManager.detectOffline(imageDataUrl);
           detections.set(fallbackDetections);
           drawDetections(fallbackDetections);
         } catch (fallbackError) {
