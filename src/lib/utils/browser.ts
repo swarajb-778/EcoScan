@@ -388,13 +388,13 @@ export function checkCameraCompatibility(): CompatibilityResult {
   // Device-specific checks
   const deviceInfo = getDeviceInfo();
   
-  if (deviceInfo.memory && deviceInfo.memory < 2) {
+  if (deviceInfo && deviceInfo.deviceMemory && deviceInfo.deviceMemory < 2) {
     result.warnings.push('Low device memory detected - performance may be affected');
     result.recommendations.push('Close other tabs to improve performance');
     result.score -= 10;
   }
 
-  if (deviceInfo.cores && deviceInfo.cores < 2) {
+  if (deviceInfo && deviceInfo.hardwareConcurrency && deviceInfo.hardwareConcurrency < 2) {
     result.warnings.push('Limited CPU cores - processing may be slow');
     result.score -= 5;
   }
@@ -550,10 +550,10 @@ export function getOptimalCameraConstraints(): MediaStreamConstraints {
   };
   
   // Adjust based on device capabilities
-  if (compatibility.score > 80 && deviceInfo.memory && deviceInfo.memory >= 4) {
+  if (compatibility.score > 80 && deviceInfo && deviceInfo.deviceMemory && deviceInfo.deviceMemory >= 4) {
     // High-end device
     constraints.video = {
-      ...constraints.video,
+      ...(constraints.video as object),
       width: { ideal: 1280, max: 1920 },
       height: { ideal: 720, max: 1080 },
       frameRate: { ideal: 30, max: 60 }
@@ -561,7 +561,7 @@ export function getOptimalCameraConstraints(): MediaStreamConstraints {
   } else if (compatibility.score > 60) {
     // Mid-range device
     constraints.video = {
-      ...constraints.video,
+      ...(constraints.video as object),
       width: { ideal: 960, max: 1280 },
       height: { ideal: 540, max: 720 },
       frameRate: { ideal: 24, max: 30 }
@@ -569,7 +569,7 @@ export function getOptimalCameraConstraints(): MediaStreamConstraints {
   } else {
     // Low-end device
     constraints.video = {
-      ...constraints.video,
+      ...(constraints.video as object),
       width: { ideal: 640, max: 800 },
       height: { ideal: 480, max: 600 },
       frameRate: { ideal: 15, max: 24 }
