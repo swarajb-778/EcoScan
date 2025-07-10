@@ -21,7 +21,7 @@
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
   import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
   import FallbackDetection from './FallbackDetection.svelte';
-  import { getOfflineManager, offline, offlineStatus, isOfflineMode } from '$lib/utils/offline-manager.js';
+  import { getOfflineManager, offlineStatus, isOfflineMode } from '$lib/utils/offline-manager.js';
 
   // Component state
   let videoElement: HTMLVideoElement;
