@@ -29,7 +29,7 @@ const API_ENDPOINTS = [
 // Model files to cache
 const MODEL_FILES = [
   '/models/yolov8n.onnx',
-  '/models/classifier.json'
+  '/data/wasteData.json'
 ];
 
 /**
