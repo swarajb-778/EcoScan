@@ -15,7 +15,7 @@
       initializeAnalytics();
       
       // Track page views
-      trackEvent('page_view', { path: $page.url.pathname });
+      trackEvent('interaction', 'page_view', 'navigation', $page.url.pathname);
       
       // Set up PWA install prompt
       window.addEventListener('beforeinstallprompt', (e) => {
@@ -26,7 +26,7 @@
 
       // Track app installation
       window.addEventListener('appinstalled', () => {
-        trackEvent('app_installed');
+        trackEvent('conversion', 'app_installed', 'pwa_install');
         isInstallable = false;
       });
     }
@@ -34,14 +34,14 @@
 
   function toggleMobileMenu() {
     showMobileMenu = !showMobileMenu;
-    trackEvent('navigation_toggle', { action: showMobileMenu ? 'open' : 'close' });
+    trackEvent('interaction', 'navigation_toggle', showMobileMenu ? 'open' : 'close');
   }
 
   async function installApp() {
     if (installPrompt) {
       installPrompt.prompt();
       const result = await installPrompt.userChoice;
-      trackEvent('install_prompt_result', { choice: result.outcome });
+      trackEvent('conversion', 'install_prompt_result', result.outcome);
       installPrompt = null;
       isInstallable = false;
     }
@@ -87,7 +87,7 @@
                      {currentPath === item.href 
                        ? 'text-green-600 bg-green-50' 
                        : 'text-gray-600 hover:text-green-600 hover:bg-gray-50'}"
-              on:click={() => trackEvent('navigation_click', { destination: item.href })}
+              on:click={() => trackEvent('interaction', 'navigation_click', item.href)}
             >
               <span class="text-lg">{item.icon}</span>
               <span>{item.label}</span>
@@ -140,7 +140,7 @@
                        : 'text-gray-600 hover:text-green-600 hover:bg-gray-50'}"
               on:click={() => {
                 showMobileMenu = false;
-                trackEvent('mobile_navigation_click', { destination: item.href });
+                trackEvent('interaction', 'mobile_navigation_click', item.href);
               }}
             >
               <span class="text-xl">{item.icon}</span>
@@ -217,7 +217,7 @@
               target="_blank" 
               rel="noopener noreferrer"
               class="text-gray-600 hover:text-green-600 transition-colors"
-              on:click={() => trackEvent('external_link_click', { destination: 'github' })}
+              on:click={() => trackEvent('interaction', 'external_link_click', 'github')}
             >
               GitHub
             </a>
