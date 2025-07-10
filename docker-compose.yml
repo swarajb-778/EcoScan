@@ -15,6 +15,12 @@ services:
       - backend
     networks:
       - ecoscan-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # Backend API (FastAPI)
   backend:
@@ -27,14 +33,41 @@ services:
       - PYTHONPATH=/app
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://ecoscan:password@postgres:5432/ecoscan_db
+      - MODEL_PATH=/app/models
+      - DETECTION_MODEL_PATH=/app/models/yolov8n.onnx
+      - CLASSIFICATION_MODEL_PATH=/app/models/waste_classifier.onnx
+      - ENV_DB_PATH=/app/data/environmental_impact.json
+      - LOG_LEVEL=INFO
+      - WORKERS=4
+      - MAX_REQUESTS=1000
+      - MAX_REQUESTS_JITTER=50
+      - ENABLE_CORS=true
+      - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+      - ENABLE_TELEMETRY=true
+      - ENVIRONMENT=development
     depends_on:
       - redis
       - postgres
     volumes:
       - ./api/models:/app/models
+      - ./api/data:/app/data
       - ./api/logs:/app/logs
     networks:
       - ecoscan-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
   # Redis (Caching)
@@ -44,8 +77,20 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     networks:
       - ecoscan-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # PostgreSQL (Database)
@@ -57,11 +102,24 @@ services:
       - POSTGRES_DB=ecoscan_db
       - POSTGRES_USER=ecoscan
       - POSTGRES_PASSWORD=password
+      - POSTGRES_INITDB_ARGS=--data-checksums
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./api/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     networks:
       - ecoscan-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecoscan"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # Nginx (Reverse Proxy)
@@ -78,6 +136,16 @@ services:
       - backend
     networks:
       - ecoscan-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   # Prometheus (Monitoring)
@@ -97,6 +165,11 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - ecoscan-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     restart: unless-stopped
 
   # Grafana (Visualization)
@@ -106,16 +179,33 @@ services:
       - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SMTP_ENABLED=false
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
     networks:
       - ecoscan-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
 networks:
   ecoscan-network:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
 
 volumes:
   redis_data:

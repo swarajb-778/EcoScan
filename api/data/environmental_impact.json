@@ -1,0 +1,191 @@
+{
+  "plastic_bottle": {
+    "co2_footprint": 2.3,
+    "recycling_rate": 0.29,
+    "decomposition_time": "450 years",
+    "recycled_uses": ["clothing", "carpets", "park benches"],
+    "facts": [
+      "It takes 3 liters of water to produce a 1-liter plastic bottle",
+      "Only 9% of all plastic waste ever produced has been recycled"
+    ]
+  },
+  "aluminum_can": {
+    "co2_footprint": 3.2,
+    "recycling_rate": 0.75,
+    "decomposition_time": "200-500 years",
+    "energy_saved_recycling": 0.95,
+    "facts": [
+      "Recycling aluminum uses 95% less energy than producing new aluminum",
+      "An aluminum can can be recycled and back on the shelf within 60 days"
+    ]
+  },
+  "glass_bottle": {
+    "co2_footprint": 0.5,
+    "recycling_rate": 0.33,
+    "decomposition_time": "1 million years",
+    "recycled_uses": ["glass containers", "fiberglass", "construction materials"],
+    "facts": [
+      "Glass can be recycled endlessly without loss in quality",
+      "Glass is made from natural materials like sand, soda ash, and limestone"
+    ]
+  },
+  "paper": {
+    "co2_footprint": 0.8,
+    "recycling_rate": 0.65,
+    "decomposition_time": "2-6 weeks",
+    "recycled_uses": ["paper products", "cardboard", "packaging"],
+    "facts": [
+      "Recycling 1 ton of paper saves 17 trees",
+      "Recycled paper produces 73% less air pollution than new paper"
+    ]
+  },
+  "cardboard": {
+    "co2_footprint": 0.7,
+    "recycling_rate": 0.70,
+    "decomposition_time": "2 months",
+    "recycled_uses": ["new cardboard", "paper products", "packaging"],
+    "facts": [
+      "Cardboard is the most recycled packaging material worldwide",
+      "Recycling 1 ton of cardboard saves 9 cubic yards of landfill space"
+    ]
+  },
+  "food_waste": {
+    "co2_footprint": 1.1,
+    "methane_production": 0.84,
+    "decomposition_time": "3-6 months",
+    "compost_time": "1-3 months",
+    "soil_improvement": "rich nutrients",
+    "facts": [
+      "Food waste in landfills produces methane, a greenhouse gas 25 times more potent than CO2",
+      "Composting food waste creates nutrient-rich soil for gardening"
+    ]
+  },
+  "coffee_cup": {
+    "co2_footprint": 0.35,
+    "recycling_rate": 0.01,
+    "decomposition_time": "20-30 years",
+    "facts": [
+      "Most coffee cups have a plastic lining making them difficult to recycle",
+      "Using a reusable cup for a year can save 23kg of CO2 emissions"
+    ]
+  },
+  "plastic_bag": {
+    "co2_footprint": 0.08,
+    "recycling_rate": 0.01,
+    "decomposition_time": "500-1000 years",
+    "facts": [
+      "A plastic bag is typically used for 12 minutes but can take 500+ years to decompose",
+      "Worldwide, 1 million plastic bags are used every minute"
+    ]
+  },
+  "newspaper": {
+    "co2_footprint": 0.5,
+    "recycling_rate": 0.80,
+    "decomposition_time": "6 weeks",
+    "recycled_uses": ["recycled paper", "egg cartons", "insulation"],
+    "facts": [
+      "Newspaper is one of the easiest materials to recycle",
+      "Recycling newspapers saves 34% of the energy needed to make new paper"
+    ]
+  },
+  "tin_can": {
+    "co2_footprint": 2.8,
+    "recycling_rate": 0.58,
+    "decomposition_time": "50 years",
+    "energy_saved_recycling": 0.60,
+    "facts": [
+      "Tin cans are actually made mostly of steel with a thin tin coating",
+      "Recycling steel saves 60% of production energy costs"
+    ]
+  },
+  "plastic_container": {
+    "co2_footprint": 1.9,
+    "recycling_rate": 0.14,
+    "decomposition_time": "20-50 years",
+    "facts": [
+      "Different types of plastic containers (#1-7) have different recycling processes",
+      "Some plastic containers contain BPA which can leach into food"
+    ]
+  },
+  "milk_carton": {
+    "co2_footprint": 0.6,
+    "recycling_rate": 0.30,
+    "decomposition_time": "5 years",
+    "facts": [
+      "Most milk cartons are made from paperboard with a thin polyethylene coating",
+      "Some regions require milk cartons to be rinsed before recycling"
+    ]
+  },
+  "styrofoam": {
+    "co2_footprint": 0.9,
+    "recycling_rate": 0.01,
+    "decomposition_time": "500+ years",
+    "facts": [
+      "Styrofoam is actually expanded polystyrene foam (EPS)",
+      "Most recycling programs don't accept styrofoam due to processing difficulties"
+    ]
+  },
+  "electronic_waste": {
+    "co2_footprint": 15.0,
+    "recycling_rate": 0.20,
+    "hazardous_materials": ["lead", "mercury", "cadmium"],
+    "facts": [
+      "E-waste contains valuable recoverable materials including gold, silver, and copper",
+      "E-waste represents 2% of trash in landfills but 70% of toxic waste"
+    ]
+  },
+  "battery": {
+    "co2_footprint": 12.5,
+    "recycling_rate": 0.45,
+    "hazardous_materials": ["lead", "lithium", "cadmium", "mercury"],
+    "facts": [
+      "One button battery can contaminate 600,000 liters of water if improperly disposed",
+      "Recycling batteries recovers metals like cobalt which is often mined under poor conditions"
+    ]
+  },
+  "light_bulb": {
+    "co2_footprint": 0.4,
+    "recycling_rate": 0.10,
+    "hazardous_materials": ["mercury", "lead"],
+    "facts": [
+      "CFLs contain small amounts of mercury and should be disposed of properly",
+      "LED bulbs last up to 25 times longer than incandescent bulbs"
+    ]
+  },
+  "clothing": {
+    "co2_footprint": 5.5,
+    "recycling_rate": 0.15,
+    "decomposition_time": "up to 200 years",
+    "facts": [
+      "It takes about 1,800 gallons of water to produce a single pair of jeans",
+      "Fast fashion is responsible for 10% of global carbon emissions"
+    ]
+  },
+  "pizza_box": {
+    "co2_footprint": 0.8,
+    "recycling_rate": 0.02,
+    "decomposition_time": "2 months",
+    "facts": [
+      "Pizza boxes with grease stains cannot be recycled and should be composted",
+      "Some pizza boxes have parts that can be torn off and recycled if not contaminated"
+    ]
+  },
+  "banana_peel": {
+    "co2_footprint": 0.1,
+    "decomposition_time": "2-5 weeks",
+    "compost_time": "2-3 weeks",
+    "facts": [
+      "Banana peels make excellent compost material",
+      "When landfilled, banana peels produce methane gas"
+    ]
+  },
+  "coffee_grounds": {
+    "co2_footprint": 0.05,
+    "decomposition_time": "2-3 weeks",
+    "compost_time": "1-2 weeks",
+    "facts": [
+      "Coffee grounds add nitrogen to compost piles",
+      "Used coffee grounds can repel garden pests and enhance soil"
+    ]
+  }
+} 
