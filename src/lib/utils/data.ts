@@ -61,7 +61,9 @@ export class DataCache<T> {
     // Remove oldest entry if cache is full
     if (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
     }
 
     this.cache.set(key, {
@@ -170,7 +172,8 @@ export class WasteDatabase {
         aliases: ['water bottle', 'soda bottle'],
         description: 'Recyclable plastic container',
         instructions: 'Remove cap and label, rinse clean',
-        tips: 'Check recycling number on bottom'
+        tips: 'Check recycling number on bottom',
+        color: '#10B981' // Green for recycle
       },
       'apple_core': {
         name: 'Apple Core',
@@ -180,7 +183,8 @@ export class WasteDatabase {
         aliases: ['apple', 'fruit core'],
         description: 'Compostable organic waste',
         instructions: 'Add to compost bin',
-        tips: 'Great for home composting'
+        tips: 'Great for home composting',
+        color: '#84CC16' // Lime for compost
       },
       'electronics': {
         name: 'Electronics',
@@ -190,7 +194,8 @@ export class WasteDatabase {
         aliases: ['phone', 'computer', 'gadget'],
         description: 'Electronic waste requiring special disposal',
         instructions: 'Take to electronics recycling center',
-        tips: 'Never put in regular trash'
+        tips: 'Never put in regular trash',
+        color: '#EF4444' // Red for landfill
       }
     };
 
