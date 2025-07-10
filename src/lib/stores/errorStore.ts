@@ -65,7 +65,7 @@ function createErrorStore() {
 
       // Record error for performance monitoring
       if (error) {
-        performanceMonitor.recordError(error, context);
+        console.error('Application error:', error, context);
       }
 
       update(state => {

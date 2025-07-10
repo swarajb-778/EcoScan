@@ -704,9 +704,9 @@ export const testUtils = {
   
   getPerformanceTester: () => new PerformanceTester(),
   
-  generateTestData: TestDataGenerator,
+  generateTestData: TestUtils,
   
-  visual: VisualTestHelper
+  visual: debugUtils
 };
 
 export function mockCameraPermissionDenied() {

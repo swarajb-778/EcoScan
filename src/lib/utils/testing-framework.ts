@@ -19,7 +19,7 @@ export interface Test {
   name: string;
   description: string;
   type: 'unit' | 'integration' | 'e2e' | 'performance' | 'security' | 'accessibility';
-  category: 'ml' | 'ui' | 'api' | 'data' | 'system';
+  category: 'ml' | 'ui' | 'api' | 'data' | 'system' | 'security';
   setup?: () => Promise<void>;
   execute: () => Promise<TestResult>;
   teardown?: () => Promise<void>;
@@ -86,7 +86,7 @@ export interface ValidationRule {
   severity: 'warning' | 'error' | 'critical';
 }
 
-class TestingFramework {
+export class TestingFramework {
   private testSuites: Map<string, TestSuite> = new Map();
   private testRuns: TestRun[] = [];
   private mockData: Map<string, MockData> = new Map();

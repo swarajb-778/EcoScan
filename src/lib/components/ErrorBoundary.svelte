@@ -28,7 +28,7 @@
     if (error) {
       // Record error for analytics
       try {
-        performanceMonitor.recordError(error, context);
+        console.error('ErrorBoundary caught error:', error, context);
       } catch (monitorError) {
         console.warn('Failed to record error in performance monitor:', monitorError);
       }
