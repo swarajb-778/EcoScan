@@ -1,10 +1,12 @@
-import { InferenceSession, Tensor } from 'onnxruntime-web';
+import * as ort from 'onnxruntime-web';
 import type { Detection, ModelConfig } from '../types/index.js';
 import { getWebGLManager } from '../utils/webgl-manager.js';
 import { getAdaptiveEngine, type OptimizationStrategy } from './adaptive-engine.js';
 import { abTestingFramework } from '$lib/utils/ab-testing.js';
 import { modelExperiment } from '$lib/experiments';
 import { isBrowser } from '../utils/browser.js';
+
+ort.env.wasm.wasmPaths = '/models/';
 
 // Model integrity and fallback configuration
 interface ModelIntegrity {
@@ -24,7 +26,7 @@ interface ModelState {
 }
 
 export class ObjectDetector {
-  private session: InferenceSession | null = null;
+  private session: ort.InferenceSession | null = null;
   private modelConfig: ModelConfig;
   private modelState: ModelState;
   private integrity: ModelIntegrity;
@@ -151,7 +153,7 @@ export class ObjectDetector {
         try {
           // Test if existing session still works
           const testData = new Float32Array(1 * 3 * 32 * 32).fill(0.5);
-          const testTensor = new Tensor('float32', testData, [1, 3, 32, 32]);
+          const testTensor = new ort.Tensor('float32', testData, [1, 3, 32, 32]);
           await this.session.run({ images: testTensor });
           
           // If we get here, session is still valid
@@ -213,7 +215,7 @@ export class ObjectDetector {
     const webglManager = getWebGLManager();
     if (!webglManager) {
       // Fallback to CPU-only execution
-      this.session = await InferenceSession.create(this.modelState.currentModel, {
+      this.session = await ort.InferenceSession.create(this.modelState.currentModel, {
         executionProviders: ['wasm'],
         graphOptimizationLevel: 'all',
         enableMemPattern: false,
@@ -246,7 +248,7 @@ export class ObjectDetector {
       sessionOptions.enableMemPattern = true;
     }
 
-    this.session = await InferenceSession.create(this.modelState.currentModel, sessionOptions);
+    this.session = await ort.InferenceSession.create(this.modelState.currentModel, sessionOptions);
   }
 
   async initialize(): Promise<void> {
@@ -333,7 +335,7 @@ export class ObjectDetector {
 
   private async fallbackToCPU(): Promise<void> {
     try {
-      this.session = await InferenceSession.create(this.modelState.currentModel, {
+      this.session = await ort.InferenceSession.create(this.modelState.currentModel, {
         executionProviders: ['wasm'],
         graphOptimizationLevel: 'all'
       });
@@ -394,7 +396,7 @@ export class ObjectDetector {
     try {
       // Create a minimal test tensor (1x3x64x64)
       const testData = new Float32Array(1 * 3 * 64 * 64).fill(0.5);
-      const testTensor = new Tensor('float32', testData, [1, 3, 64, 64]);
+      const testTensor = new ort.Tensor('float32', testData, [1, 3, 64, 64]);
       
       // Run a test inference with timeout
       const timeoutPromise = new Promise((_, reject) => {
@@ -606,7 +608,7 @@ export class ObjectDetector {
     return ctx.getImageData(0, 0, newWidth, newHeight);
   }
 
-  private preprocessImageAdaptive(imageData: ImageData, strategy: OptimizationStrategy): Tensor {
+  private preprocessImageAdaptive(imageData: ImageData, strategy: OptimizationStrategy): ort.Tensor {
     const { width, height, data } = imageData;
     const [modelWidth, modelHeight] = this.modelConfig.inputSize;
     
@@ -653,7 +655,7 @@ export class ObjectDetector {
       tensorData[tensorIndex + 2 * modelHeight * modelWidth] = resizedData[pixelIndex + 2] / normalizationFactor; // B
     }
     
-    return new Tensor('float32', tensorData, [1, 3, modelHeight, modelWidth]);
+    return new ort.Tensor('float32', tensorData, [1, 3, modelHeight, modelWidth]);
   }
 
   private postprocessResultsAdaptive(results: any, originalWidth: number, originalHeight: number, strategy: OptimizationStrategy): Detection[] {
