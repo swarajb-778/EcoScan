@@ -238,12 +238,12 @@ export class AnalyticsEngine {
    * Track detection event with environmental impact
    */
   trackDetection(detection: Detection, processingTime: number, method: 'camera' | 'upload' | 'voice' | 'text'): void {
-    this.track('detection', 'waste_classification', 'item_detected', detection.label, detection.confidence, {
+    this.track('detection', 'waste_classification', 'item_detected', detection.class, detection.confidence, {
       category: detection.category,
       processingTime,
       method,
       bbox: detection.bbox,
-      instructions: detection.instructions
+      class: detection.class
     });
 
     // Update impact metrics
@@ -837,4 +837,61 @@ export const analytics = {
   generateInsights: () => getAnalyticsEngine().generateInsights(),
   
   getEngine: () => getAnalyticsEngine()
-}; 
+};
+
+/**
+ * Initialize analytics system
+ * This function is called once on app startup
+ */
+export async function initializeAnalytics(): Promise<void> {
+  try {
+    const engine = getAnalyticsEngine();
+    console.log('🚀 Analytics system initialized successfully');
+    return Promise.resolve();
+  } catch (error) {
+    console.error('❌ Failed to initialize analytics:', error);
+    throw error;
+  }
+}
+
+/**
+ * Track a general event
+ * Simple wrapper for the most common use case
+ */
+export function trackEvent(
+  category: string,
+  action: string,
+  label?: string,
+  value?: number
+): void {
+  try {
+    const engine = getAnalyticsEngine();
+    engine.track('interaction', category, action, label, value);
+  } catch (error) {
+    console.error('❌ Failed to track event:', error);
+  }
+}
+
+/**
+ * Track feature usage
+ */
+export function trackFeatureUsage(feature: string, action: string, metadata?: Record<string, any>): void {
+  try {
+    const engine = getAnalyticsEngine();
+    engine.track('interaction', 'feature', action, feature, undefined, metadata);
+  } catch (error) {
+    console.error('❌ Failed to track feature usage:', error);
+  }
+}
+
+/**
+ * Track page view
+ */
+export function trackPageView(path: string, title?: string): void {
+  try {
+    const engine = getAnalyticsEngine();
+    engine.track('interaction', 'navigation', 'page_view', path, undefined, { title });
+  } catch (error) {
+    console.error('❌ Failed to track page view:', error);
+  }
+}
