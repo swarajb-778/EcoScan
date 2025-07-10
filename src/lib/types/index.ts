@@ -2,8 +2,10 @@
 export interface Detection {
   bbox: [number, number, number, number]; // [x, y, width, height]
   class: string;
+  label: string; // Human-readable label for the detected object
   confidence: number;
   category: 'recycle' | 'compost' | 'landfill';
+  instructions?: string; // Disposal instructions
 }
 
 export interface WasteClassification {
@@ -54,7 +56,13 @@ export interface ClassificationData {
 // Performance monitoring types
 export interface PerformanceMetrics {
   averageInferenceTime: number;
+  inferenceTime: number;
+  modelLoadTime: number;
+  cameraInitTime: number;
+  componentMountTime: number;
+  cameraResolution: string;
   fps: number;
+  frameRate: number;
   memoryUsage: number;
   batteryLevel: number;
   isCharging: boolean;
@@ -76,7 +84,7 @@ export interface AppSettings {
 
 export interface AppLoadingState {
   isLoading: boolean;
-  stage: 'idle' | 'initializing' | 'loading-model' | 'processing' | 'complete';
+  stage: 'idle' | 'initializing' | 'loading-model' | 'processing' | 'complete' | 'models' | 'camera' | 'detector' | 'classifier';
   progress: number; // 0-100
   message: string;
 } 
