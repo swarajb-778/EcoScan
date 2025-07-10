@@ -20,7 +20,7 @@ export interface ExtendedDetection extends Detection {
 export interface SearchResult {
   item: ExtendedWasteClassification;
   score: number;
-  matches?: any[];
+  matches?: readonly any[];
 }
 
 export interface ClassificationStats {
