@@ -120,7 +120,7 @@ export class DataCache<T> {
  */
 export class WasteDatabase {
   private data: Record<string, ExtendedWasteClassification> = {};
-  private fuse: Fuse<WasteClassification> | null = null;
+  private fuse: Fuse<ExtendedWasteClassification> | null = null;
   private cache = new DataCache<SearchResult[]>(50);
   private keywords: Record<string, string[]> = {};
 
