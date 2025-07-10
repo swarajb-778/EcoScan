@@ -1102,16 +1102,16 @@
 
   // Handle fallback detection results
   function handleFallbackDetection(event: CustomEvent<{detections: Detection[], method: string}>) {
-    const { detections, method } = event.detail;
+    const { detections: detectedItems, method } = event.detail;
     
-    console.log(`✅ Fallback detection successful using ${method}:`, detections);
+    console.log(`✅ Fallback detection successful using ${method}:`, detectedItems);
     
     // Update detections store with fallback results
-    detections.set(detections);
+    detections.set(detectedItems);
     
     // Record fallback usage for analytics
     perf.record('fallbackDetectionUsed', 1, 'count', 'ml');
-    perf.record('fallbackMethod', this.mapMethodToScore(method), 'score', 'ml');
+    perf.record('fallbackMethod', mapMethodToScore(method), 'score', 'ml');
     
     // Show success message
     setSuccess(`Successfully classified using ${method} input`);
@@ -1137,7 +1137,7 @@
     const { isLoading, method } = event.detail;
     
     if (isLoading) {
-      setLoadingState(true, 'fallback', 0, `Processing ${method} input...`);
+      setLoadingState(true, 'processing', 0, `Processing ${method} input...`);
     } else {
       setLoadingState(false);
     }
