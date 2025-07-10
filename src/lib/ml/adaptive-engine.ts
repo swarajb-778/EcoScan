@@ -4,20 +4,7 @@
  */
 
 import { isBrowser, safeCreateCanvas, safeNavigator, safeWindow } from '../utils/browser.js';
-
-export interface DeviceCapabilities {
-  cpuCores: number;
-  memoryGB: number;
-  isLowEndDevice: boolean;
-  hasGPU: boolean;
-  supportedAPIs: {
-    webgl: boolean;
-    webgl2: boolean;
-    webasm: boolean;
-    webnn: boolean;
-  };
-  browserTier: 'low' | 'medium' | 'high';
-}
+import { performanceScaling, type DeviceCapabilities } from '../utils/performance-scaling.js';
 
 export interface ThermalState {
   level: 'normal' | 'fair' | 'serious' | 'critical';
@@ -85,12 +72,7 @@ export class AdaptiveInferenceEngine {
   private readonly HISTORY_LENGTH = 50;
 
   constructor() {
-    if (!isBrowser()) {
-      // Create minimal fallback state for SSR
-      this.deviceCapabilities = this.getFallbackCapabilities();
-    } else {
-      this.deviceCapabilities = this.detectDeviceCapabilities();
-    }
+    this.deviceCapabilities = performanceScaling.getDeviceCapabilities();
     
     this.thermalState = {
       level: 'normal',
@@ -121,112 +103,12 @@ export class AdaptiveInferenceEngine {
     }
   }
 
-  private getFallbackCapabilities(): DeviceCapabilities {
-    return {
-      cpuCores: 4,
-      memoryGB: 4,
-      isLowEndDevice: false,
-      hasGPU: false,
-      supportedAPIs: {
-        webgl: false,
-        webgl2: false,
-        webasm: true,
-        webnn: false
-      },
-      browserTier: 'medium'
-    };
-  }
-
-  private detectDeviceCapabilities(): DeviceCapabilities {
-    if (!isBrowser()) {
-      return this.getFallbackCapabilities();
-    }
-
-    // CPU cores detection
-    const navigator = safeNavigator();
-    const cpuCores = navigator?.hardwareConcurrency || 4;
-    
-    // Memory estimation (approximate)
-    const memoryGB = this.estimateMemory();
-    
-    // GPU detection
-    const canvas = safeCreateCanvas();
-    let hasGPU = false;
-    let supportedAPIs = {
-      webgl: false,
-      webgl2: false,
-      webasm: typeof WebAssembly !== 'undefined',
-      webnn: false
-    };
-
-    if (canvas) {
-      const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
-      hasGPU = !!gl;
-      
-      supportedAPIs = {
-        webgl: !!canvas.getContext('webgl'),
-        webgl2: !!canvas.getContext('webgl2'),
-        webasm: typeof WebAssembly !== 'undefined',
-        webnn: !!(navigator && 'ml' in navigator)
-      };
-    }
-    
-    // Device tier classification
-    const isLowEndDevice = cpuCores <= 2 || memoryGB <= 2;
-    const browserTier = this.classifyBrowserTier();
-    
-    return {
-      cpuCores,
-      memoryGB,
-      isLowEndDevice,
-      hasGPU,
-      supportedAPIs,
-      browserTier
-    };
-  }
-
-  private estimateMemory(): number {
-    if (!isBrowser()) return 4; // Default fallback
-    
-    // Use performance.memory if available
-    if ('memory' in performance) {
-      const memInfo = (performance as any).memory;
-      if (memInfo && memInfo.jsHeapSizeLimit) {
-        return Math.round(memInfo.jsHeapSizeLimit / (1024 * 1024 * 1024));
-      }
-    }
-    
-    // Fallback estimation based on user agent and other factors
-    const navigator = safeNavigator();
-    if (!navigator) return 4;
-    
-    const userAgent = navigator.userAgent.toLowerCase();
-    
-    if (userAgent.includes('mobile')) {
-      return 2; // Assume 2GB for mobile
-    } else if (userAgent.includes('tablet')) {
-      return 4; // Assume 4GB for tablets
-    } else {
-      return 8; // Assume 8GB for desktop
-    }
-  }
-
-  private classifyBrowserTier(): 'low' | 'medium' | 'high' {
-    const { cpuCores, memoryGB, hasGPU } = this.deviceCapabilities;
-    
-    if (cpuCores >= 8 && memoryGB >= 8 && hasGPU) {
-      return 'high';
-    } else if (cpuCores >= 4 && memoryGB >= 4) {
-      return 'medium';
-    } else {
-      return 'low';
-    }
-  }
-
   private getInitialConfig(): AdaptiveConfig {
-    const { browserTier, isLowEndDevice } = this.deviceCapabilities;
+    const { cpuCores, deviceMemory } = this.deviceCapabilities;
+
+    const isLowEndDevice = cpuCores <= 2 || deviceMemory <= 2;
     
-    if (isLowEndDevice || browserTier === 'low') {
+    if (isLowEndDevice) {
       return {
         targetFPS: 15,
         maxInferenceTime: 200,
@@ -235,7 +117,7 @@ export class AdaptiveInferenceEngine {
         resolution: { width: 320, height: 240 },
         enableOptimizations: true
       };
-    } else if (browserTier === 'medium') {
+    } else if (cpuCores >= 4 && deviceMemory >= 4) {
       return {
         targetFPS: 20,
         maxInferenceTime: 150,
@@ -445,7 +327,9 @@ export class AdaptiveInferenceEngine {
     }
     
     // Device capability constraints
-    if (this.deviceCapabilities.isLowEndDevice) {
+    const { cpuCores, deviceMemory } = this.deviceCapabilities;
+    const isLowEndDevice = cpuCores <= 2 || deviceMemory <= 2;
+    if (isLowEndDevice) {
       strategy.maxObjects = Math.min(strategy.maxObjects, 5);
       strategy.enableQuantization = true;
     }
