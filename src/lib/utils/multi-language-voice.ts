@@ -482,7 +482,7 @@ class MultiLanguageVoice {
       tempRecognition.interimResults = false;
       tempRecognition.maxAlternatives = 1;
 
-      tempRecognition.onresult = (event) => {
+      tempRecognition.onresult = (event: SpeechRecognitionEvent) => {
         if (event.results.length > 0) {
           const result = event.results[0][0];
           const detectedItems = this.processTranscript(result.transcript, language);
