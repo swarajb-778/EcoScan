@@ -180,7 +180,9 @@
         bbox: [0, 0, 0, 0] as [number, number, number, number],
         class: transcript.toLowerCase().trim(),
         confidence: classification.confidence,
-        category: classification.category
+        category: classification.category,
+        label: transcript.charAt(0).toUpperCase() + transcript.slice(1),
+        instructions: classification.instructions || 'Detected via voice input'
       };
       
       selectedDetection.set(mockDetection);

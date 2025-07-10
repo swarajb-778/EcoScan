@@ -132,13 +132,12 @@ export class FallbackDetectionEngine {
     
     const mockDetections: Detection[] = [
       {
-        id: '1',
         label: 'Detected Object',
         category: 'recycle',
         confidence: 0.85,
         bbox: [100, 100, 200, 150],
-        instructions: 'Please upload for manual classification',
-        tips: ['Image upload detected - manual review recommended']
+        class: 'unknown',
+        instructions: 'Please upload for manual classification'
       }
     ];
     
@@ -210,13 +209,12 @@ export class FallbackDetectionEngine {
     }
     
     const detection: Detection = {
-      id: '1',
       label: bestMatch.keyword || 'Voice Input',
-      category: bestMatch.category as 'recycle' | 'compost' | 'trash',
+      category: (bestMatch.category === 'trash' ? 'landfill' : bestMatch.category) as 'recycle' | 'compost' | 'landfill',
       confidence: bestMatch.confidence,
       bbox: [0, 0, 100, 100], // Placeholder bbox for voice input
-      instructions: this.getCategoryInstructions(bestMatch.category as any),
-      tips: [`Voice input detected: "${transcript}"`]
+      class: bestMatch.keyword || 'unknown',
+      instructions: this.getCategoryInstructions(bestMatch.category as any)
     };
     
     return [detection];
@@ -284,13 +282,12 @@ export class FallbackDetectionEngine {
     }
     
     const detection: Detection = {
-      id: '1',
       label: bestMatch.keyword.charAt(0).toUpperCase() + bestMatch.keyword.slice(1),
-      category: bestMatch.category as 'recycle' | 'compost' | 'trash',
+      category: (bestMatch.category === 'trash' ? 'landfill' : bestMatch.category) as 'recycle' | 'compost' | 'landfill',
       confidence: bestMatch.confidence,
       bbox: [0, 0, 100, 100], // Placeholder bbox for text input
-      instructions: this.getCategoryInstructions(bestMatch.category as any),
-      tips: [`Text input: "${text}"`]
+      class: bestMatch.keyword,
+      instructions: this.getCategoryInstructions(bestMatch.category as any)
     };
     
     return [detection];

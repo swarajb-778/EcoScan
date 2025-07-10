@@ -524,8 +524,8 @@
       browser: `${browserInfo.name} ${browserInfo.version}`,
       platform: browserInfo.platform,
       mobile: isMobile,
-      memory: deviceInfo.memory,
-      cores: deviceInfo.cores
+      memory: deviceInfo?.deviceMemory || 0,
+      cores: deviceInfo?.hardwareConcurrency || 1
     });
     
     let userMessage = '';
@@ -610,7 +610,7 @@
     }
     
     // Device-specific recommendations
-    if (deviceInfo.memory && deviceInfo.memory < 2) {
+    if (deviceInfo && deviceInfo.deviceMemory && deviceInfo.deviceMemory < 2) {
       recommendations.push('Close other tabs to free up memory');
       recommendations.push('Consider using image upload instead of real-time detection');
     }

@@ -449,13 +449,12 @@ export class OfflineManager {
     
     const offlineDetections: Detection[] = [
       {
-        id: `offline_detection_${Date.now()}`,
         label: 'Offline Detected Item',
         category: 'recycle',
         confidence: 0.75,
         bbox: [100, 100, 200, 200],
-        instructions: 'Detected offline - sync when online for detailed analysis',
-        tips: ['Offline detection may have reduced accuracy']
+        class: 'unknown',
+        instructions: 'Detected offline - sync when online for detailed analysis'
       }
     ];
     

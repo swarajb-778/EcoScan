@@ -553,7 +553,9 @@ export class ObjectDetector {
         bbox: [0, 0, 0, 0],
         class: 'unknown',
         confidence: 0,
-        category: 'landfill'
+        category: 'landfill',
+        label: 'Unknown Item',
+        instructions: 'Please try again with better lighting or a clearer view of the item.'
       }];
     }
   }
@@ -709,7 +711,9 @@ export class ObjectDetector {
         bbox: [x, y, width, height],
         class: className,
         confidence: maxConfidence,
-        category: this.mapToCategory(className)
+        category: this.mapToCategory(className),
+        label: className.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        instructions: this.getInstructionsForCategory(this.mapToCategory(className))
       });
     }
     
@@ -786,6 +790,19 @@ export class ObjectDetector {
     if (recycleItems.includes(className)) return 'recycle';
     if (compostItems.includes(className)) return 'compost';
     return 'landfill';
+  }
+
+  private getInstructionsForCategory(category: 'recycle' | 'compost' | 'landfill'): string {
+    switch (category) {
+      case 'recycle':
+        return 'Clean the item before placing it in the recycling bin. Remove any food residue or liquids.';
+      case 'compost':
+        return 'Place in your compost bin or organic waste collection. Remove any non-organic materials first.';
+      case 'landfill':
+        return 'This item goes in your regular trash bin. Consider if there are alternatives to reduce waste.';
+      default:
+        return 'Please dispose of this item according to your local waste management guidelines.';
+    }
   }
 
   private updatePerformanceMetrics(inferenceTime: number, objectCount: number): void {
