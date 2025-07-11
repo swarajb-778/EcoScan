@@ -4,6 +4,21 @@
  */
 
 import { browser } from '$app/environment';
+import { 
+  safeNavigator, 
+  safeWindow, 
+  getDeviceMemory, 
+  getHardwareConcurrency,
+  initializePerformanceMonitoring,
+  getThermalAPI,
+  getBatteryAPI,
+  getConnectionAPI,
+  safeAsyncOperation,
+  safeSyncOperation,
+  getUserAgent,
+  getPlatform
+} from './ssr-safe.js';
+import { diagnostic } from './diagnostic.js';
 
 export interface DeviceCapabilities {
   cpuCores: number;
@@ -120,44 +135,25 @@ class PerformanceScaling {
   }
 
   /**
-   * Detect device capabilities with improved safety
+   * Detect device capabilities with improved safety using SSR-safe utilities
    */
   private detectDeviceCapabilities(): DeviceCapabilities {
-    try {
-      // Check if we have access to window and navigator
-      if (typeof window === 'undefined' || typeof window.navigator === 'undefined') {
-        throw new Error('Window or Navigator not available');
-      }
+    return safeSyncOperation(() => {
+      const navigator = safeNavigator() as any;
+      const window = safeWindow();
+      const connection = getConnectionAPI();
       
-      const navigator = window.navigator as any;
-      const screen = window.screen;
+      // Extract values with safe defaults using SSR-safe utilities
+      const hardwareConcurrency = getHardwareConcurrency();
+      const deviceMemory = getDeviceMemory();
+      const maxTouchPoints = navigator?.maxTouchPoints || 0;
+      const connectionType = connection?.type || 'unknown';
+      const effectiveType = connection?.effectiveType || '4g';
+      const devicePixelRatio = window?.devicePixelRatio || 1;
+      const userAgent = getUserAgent();
+      const platform = getPlatform();
       
-      // Extract values with safe defaults
-      const hardwareConcurrency = typeof navigator.hardwareConcurrency === 'number' ? 
-        navigator.hardwareConcurrency : 2;
-      
-      const deviceMemory = typeof navigator.deviceMemory === 'number' ? 
-        navigator.deviceMemory : 2;
-        
-      const maxTouchPoints = typeof navigator.maxTouchPoints === 'number' ? 
-        navigator.maxTouchPoints : 0;
-      
-      const connectionType = navigator.connection && 
-        typeof navigator.connection.type === 'string' ? 
-        navigator.connection.type : 'unknown';
-        
-      const effectiveType = navigator.connection && 
-        typeof navigator.connection.effectiveType === 'string' ? 
-        navigator.connection.effectiveType : '4g';
-        
-      const devicePixelRatio = typeof window.devicePixelRatio === 'number' ? 
-        window.devicePixelRatio : 1;
-        
-      const userAgent = typeof navigator.userAgent === 'string' ? 
-        navigator.userAgent : 'unknown';
-        
-      const platform = typeof navigator.platform === 'string' ? 
-        navigator.platform : 'unknown';
+      diagnostic.logWarning(`Device capabilities detected: ${hardwareConcurrency} cores, ${deviceMemory}GB memory`, 'PerformanceScaling');
       
       return {
         cpuCores: hardwareConcurrency,
@@ -170,22 +166,18 @@ class PerformanceScaling {
         userAgent,
         platform
       };
-    } catch (error) {
-      console.error('[PerformanceScaling] Error detecting device capabilities:', error);
-      
-      // Return safe defaults
-      return {
-        cpuCores: 2,
-        deviceMemory: 2,
-        maxTouchPoints: 0,
-        connectionType: 'unknown',
-        effectiveType: '4g',
-        devicePixelRatio: 1,
-        hardwareConcurrency: 2,
-        userAgent: 'unknown',
-        platform: 'unknown'
-      };
-    }
+    }, {
+      // Safe defaults for SSR or error cases
+      cpuCores: 4,
+      deviceMemory: 4,
+      maxTouchPoints: 0,
+      connectionType: 'unknown',
+      effectiveType: '4g',
+      devicePixelRatio: 1,
+      hardwareConcurrency: 4,
+      userAgent: 'unknown',
+      platform: 'unknown'
+    }, 'Device Capabilities Detection');
   }
 
   /**
@@ -337,24 +329,34 @@ class PerformanceScaling {
   }
 
   /**
-   * Initialize performance monitoring
+   * Initialize performance monitoring with SSR safety
    */
   private initializeMonitoring(): void {
-    this.startFPSMonitoring();
-    this.startThermalMonitoring();
-    this.startBatteryMonitoring();
-    this.startMemoryMonitoring();
+    if (!browser) {
+      diagnostic.logWarning('Skipping performance monitoring during SSR', 'PerformanceScaling');
+      return;
+    }
     
-    // Start adaptive scaling
-    this.isMonitoring = true;
-    this.adaptiveScaling();
+    safeAsyncOperation(async () => {
+      this.startFPSMonitoring();
+      this.startThermalMonitoring();
+      this.startBatteryMonitoring();
+      this.startMemoryMonitoring();
+      
+      // Start adaptive scaling
+      this.isMonitoring = true;
+      this.adaptiveScaling();
+      
+      diagnostic.logWarning('Performance monitoring initialized successfully', 'PerformanceScaling');
+    }, undefined, 'Performance Monitoring Initialization');
   }
 
   /**
-   * Start FPS monitoring using Performance Observer
+   * Start FPS monitoring using Performance Observer with SSR safety
    */
   private startFPSMonitoring(): void {
-    if ('PerformanceObserver' in window) {
+    const window = safeWindow();
+    if (window && 'PerformanceObserver' in window) {
       try {
         this.observer = new PerformanceObserver((list) => {
           const entries = list.getEntries();
@@ -366,8 +368,9 @@ class PerformanceScaling {
         });
         
         this.observer.observe({ entryTypes: ['measure', 'navigation', 'paint'] });
+        diagnostic.logWarning('PerformanceObserver initialized for FPS monitoring', 'PerformanceScaling');
       } catch (error) {
-        console.warn('[PerformanceScaling] PerformanceObserver not supported:', error);
+        diagnostic.logWarning(`PerformanceObserver not supported: ${error}`, 'PerformanceScaling');
       }
     }
     
@@ -404,18 +407,21 @@ class PerformanceScaling {
   }
 
   /**
-   * Start thermal state monitoring
+   * Start thermal state monitoring with SSR safety
    */
   private startThermalMonitoring(): void {
+    const thermalAPI = getThermalAPI();
+    const navigator = safeNavigator();
+    
     // Modern browsers with thermal API (experimental)
-    if ('devicethermalstate' in navigator) {
-      // Note: This API is experimental and may not be available
+    if (thermalAPI && navigator) {
       try {
         (navigator as any).addEventListener?.('devicethermalstatechange', (event: any) => {
           this.updateThermalState(event.state);
         });
+        diagnostic.logWarning('Thermal monitoring API initialized', 'PerformanceScaling');
       } catch (error) {
-        console.warn('[PerformanceScaling] Thermal monitoring not available:', error);
+        diagnostic.logWarning(`Thermal monitoring not available: ${error}`, 'PerformanceScaling');
       }
     }
     
@@ -458,11 +464,12 @@ class PerformanceScaling {
   }
 
   /**
-   * Start battery monitoring
+   * Start battery monitoring with SSR safety
    */
   private startBatteryMonitoring(): void {
-    if ('getBattery' in navigator) {
-      (navigator as any).getBattery().then((battery: any) => {
+    safeAsyncOperation(async () => {
+      const battery = await getBatteryAPI();
+      if (battery) {
         this.batteryMonitor = battery;
         this.updateBatteryInfo(battery);
         
@@ -470,10 +477,12 @@ class PerformanceScaling {
         battery.addEventListener('levelchange', () => this.updateBatteryInfo(battery));
         battery.addEventListener('chargingtimechange', () => this.updateBatteryInfo(battery));
         battery.addEventListener('dischargingtimechange', () => this.updateBatteryInfo(battery));
-      }).catch((error: any) => {
-        console.warn('[PerformanceScaling] Battery API not available:', error);
-      });
-    }
+        
+        diagnostic.logWarning('Battery monitoring initialized', 'PerformanceScaling');
+      } else {
+        diagnostic.logWarning('Battery API not available', 'PerformanceScaling');
+      }
+    }, undefined, 'Battery Monitoring Initialization');
   }
 
   /**
