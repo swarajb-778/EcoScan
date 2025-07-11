@@ -9,13 +9,14 @@ import { diagnostic } from '../utils/diagnostic.js';
 import { safeAsyncOperation, safeSyncOperation, isSecureContext } from '../utils/ssr-safe.js';
 import { onnxManager } from './onnx-config.js';
 
-// Configure ONNX Runtime with the manager for enhanced error handling
+// Configure ONNX Runtime properly for Vite/SvelteKit
 if (isBrowser()) {
-  onnxManager.initialize().then(() => {
-    diagnostic.logWarning('ONNX Runtime initialized via manager', 'ObjectDetector');
-  }).catch(error => {
-    diagnostic.logError(`ONNX Runtime manager initialization failed: ${error}`, 'ObjectDetector');
-  });
+  // Set the WASM paths before any ONNX operations
+  ort.env.wasm.wasmPaths = '/models/';
+  ort.env.wasm.proxy = false;
+  ort.env.logLevel = 'warning';
+  
+  diagnostic.logWarning('ONNX Runtime environment configured in detector', 'ObjectDetector');
 }
 
 // Model integrity and fallback configuration
@@ -106,52 +107,70 @@ export class ObjectDetector {
   }
 
   private setupAdaptiveIntegration(): void {
+    if (!isBrowser()) {
+      console.warn('Skipping adaptive integration during SSR');
+      return;
+    }
+
     // Listen for adaptive configuration changes
-    window.addEventListener('adaptive-config-change', this.adaptiveConfigBound);
+    window.addEventListener('adaptive-config-change', this.adaptiveConfigBound as EventListener);
+  }
+
+  private handleWebGLLoss(event: Event): void {
+    console.warn('�� WebGL context lost in ML detector');
+    this.isInitialized = false;
+  }
+
+  private handleWebGLRestore(event: Event): void {
+    console.log('🟢 WebGL context restored in ML detector');
+    // Recovery will be handled by the WebGL manager callback
+  }
+
+  private handleMemoryPressure(event: CustomEvent): void {
+    console.warn('⚠️ GPU memory pressure detected, adjusting ML detector');
+    const { severity } = event.detail;
     
-    // Initialize with current adaptive config
-    const adaptiveConfig = getAdaptiveEngine().getCurrentConfig();
-    this.applyAdaptiveConfig(adaptiveConfig);
+    if (severity === 'critical' && this.session) {
+      // Force CPU fallback during memory pressure
+      this.fallbackToCPU().catch(error => {
+        console.error('Failed to fallback to CPU during memory pressure:', error);
+      });
+    }
   }
 
   private handleAdaptiveConfigChange(event: Event): void {
     const customEvent = event as CustomEvent;
-    const { config, strategy } = customEvent.detail;
+    const { config } = customEvent.detail;
+    console.log('🔄 Adaptive config changed for ML detector:', config);
     
-    console.log('🔧 Applying adaptive configuration to ML detector:', {
-      targetFPS: config.targetFPS,
-      resolution: config.resolution,
-      strategy: strategy
-    });
-    
-    this.applyAdaptiveConfig(config);
-  }
-
-  private applyAdaptiveConfig(config: any): void {
     // Update model configuration based on adaptive settings
-    this.modelConfig.threshold = Math.max(0.3, config.qualityLevel === 'low' ? 0.6 : 0.5);
-    
-    // Update resolution if needed (this would typically be handled by the camera component)
-    if (config.resolution) {
-      // Store for preprocessing
-      this.modelConfig.inputSize = [
-        Math.min(640, config.resolution.width),
-        Math.min(640, config.resolution.height)
-      ];
+    if (config.qualityLevel === 'low' && this.modelState.currentModel.includes('yolov8n')) {
+      // Already using the most optimized model
+      return;
     }
   }
 
-  private handleWebGLLoss(): void {
-    console.warn('💥 WebGL context lost - ML inference paused');
-    this.isInitialized = false;
+  private updatePerformanceMetrics(metrics: { inferenceTime: number }): void {
+    // Update internal performance tracking
+    this.inferenceHistory.push(metrics.inferenceTime);
     
-    // Don't dispose session immediately - it might recover
-    // Just mark as not initialized to prevent new inferences
-  }
+    // Keep only last 10 measurements
+    if (this.inferenceHistory.length > 10) {
+      this.inferenceHistory.shift();
+    }
 
-  private handleWebGLRestore(): void {
-    console.log('🔄 WebGL context restored - attempting ML recovery');
-    // Recovery will be handled by the recovery callback
+    // Update adaptive engine with performance metrics
+    const adaptiveEngine = getAdaptiveEngine();
+    const currentTime = Date.now();
+    const timeSinceLastInference = currentTime - this.lastInferenceTime;
+    const estimatedFPS = timeSinceLastInference > 0 ? 1000 / timeSinceLastInference : 0;
+    this.lastInferenceTime = currentTime;
+
+    adaptiveEngine.updatePerformanceMetrics({
+      fps: estimatedFPS,
+      averageInferenceTime: metrics.inferenceTime,
+      errors: this.modelState.failureCount
+    });
   }
 
   private async handleWebGLRecovery(): Promise<void> {
@@ -189,38 +208,44 @@ export class ObjectDetector {
     }
   }
 
-  private handleMemoryPressure(event: CustomEvent): void {
-    console.warn('💾 GPU memory pressure - optimizing ML detector');
-    
-    const { memoryUsage, limit } = event.detail;
-    
-    // Reduce model complexity if needed
-    if (memoryUsage > limit * 0.95) {
-      this.optimizeForLowMemory();
-    }
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  private optimizeForLowMemory(): void {
-    // Switch to a smaller model if available
-    if (this.modelState.fallbackIndex < this.integrity.fallbackModels.length - 1) {
-      console.log('Switching to smaller model due to memory pressure');
-      this.modelState.fallbackIndex++;
-      this.modelState.currentModel = this.integrity.fallbackModels[this.modelState.fallbackIndex];
+  private async verifyModelIntegrity(modelPath: string): Promise<boolean> {
+    try {
+      const response = await fetch(modelPath, { method: 'HEAD' });
       
-      // Recreate session with smaller model
-      this.reinitialize();
-    }
-  }
+      if (!response.ok) {
+        console.warn(`Model not accessible: ${response.statusText}`);
+        return false;
+      }
 
-  private async reinitialize(): Promise<void> {
-    this.isInitialized = false;
-    if (this.session) {
-      this.session = null;
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) {
+        const size = parseInt(contentLength, 10);
+        const expectedSize = this.integrity.expectedSize;
+        const tolerance = expectedSize * 0.1; // 10% tolerance
+        
+        if (Math.abs(size - expectedSize) > tolerance) {
+          console.warn(`Model size mismatch: expected ~${expectedSize}, got ${size}`);
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`Model integrity check failed: ${error}`);
+      return false;
     }
-    await this.initialize();
   }
 
   private async initializeWithContext(): Promise<void> {
+    // Wait for ONNX Runtime to be ready
+    if (!onnxManager.isReady()) {
+      await onnxManager.initialize();
+    }
+
     // Enhanced initialization with WebGL context awareness
     const webglManager = getWebGLManager();
     if (!webglManager) {
@@ -231,6 +256,7 @@ export class ObjectDetector {
         enableMemPattern: false,
         enableCpuMemArena: false
       });
+      diagnostic.logWarning('ONNX session created with WASM provider only', 'ObjectDetector');
       return;
     }
 
@@ -259,6 +285,7 @@ export class ObjectDetector {
     }
 
     this.session = await ort.InferenceSession.create(this.modelState.currentModel, sessionOptions);
+    diagnostic.logWarning(`ONNX session created with providers: ${executionProviders.join(', ')}`, 'ObjectDetector');
   }
 
   async initialize(): Promise<void> {
@@ -267,6 +294,12 @@ export class ObjectDetector {
     
     while (attempts < maxAttempts) {
       try {
+        // Wait for ONNX Runtime to be ready
+        if (!onnxManager.isReady()) {
+          diagnostic.logWarning('Waiting for ONNX Runtime to initialize...', 'ObjectDetector');
+          await onnxManager.initialize();
+        }
+
         const webglManager = getWebGLManager();
         
         // Check WebGL availability first
@@ -300,7 +333,7 @@ export class ObjectDetector {
       } catch (error) {
         attempts++;
         this.modelState.failureCount++;
-        console.error(`Attempt ${attempts + 1} failed for ${this.modelState.currentModel}:`, error);
+        console.error(`Attempt ${attempts} failed for ${this.modelState.currentModel}:`, error);
         
         // Check if this is a WebGL-related error
         if (this.isWebGLError(error)) {
@@ -329,20 +362,6 @@ export class ObjectDetector {
     }
   }
 
-  private isWebGLError(error: any): boolean {
-    const webglIndicators = [
-      'webgl',
-      'context lost',
-      'gpu',
-      'graphics',
-      'rendering context',
-      'execution provider'
-    ];
-    
-    const errorMessage = error?.message?.toLowerCase() || '';
-    return webglIndicators.some(indicator => errorMessage.includes(indicator));
-  }
-
   private async fallbackToCPU(): Promise<void> {
     try {
       this.session = await ort.InferenceSession.create(this.modelState.currentModel, {
@@ -355,47 +374,34 @@ export class ObjectDetector {
     }
   }
 
-  private async verifyModelIntegrity(modelPath: string): Promise<boolean> {
-    try {
-      const response = await fetch(modelPath, { method: 'HEAD' });
-      if (!response.ok) {
-        console.warn(`Model not accessible: ${modelPath}`);
-        return false;
-      }
+  private isWebGLError(error: any): boolean {
+    const errorStr = error.toString().toLowerCase();
+    return errorStr.includes('webgl') || 
+           errorStr.includes('gl_') || 
+           errorStr.includes('context lost') ||
+           errorStr.includes('backend not found');
+  }
 
-      const contentLength = response.headers.get('content-length');
-      if (contentLength) {
-        const size = parseInt(contentLength, 10);
-        if (Math.abs(size - this.integrity.expectedSize) > this.integrity.expectedSize * 0.1) {
-          console.warn(`Model size mismatch. Expected: ${this.integrity.expectedSize}, Got: ${size}`);
-          return false;
-        }
-      }
+  private isCorruptionError(error: any): boolean {
+    const errorStr = error.toString().toLowerCase();
+    return errorStr.includes('corrupted') || 
+           errorStr.includes('invalid model') || 
+           errorStr.includes('parse error');
+  }
 
-      // Additional integrity check with partial download
-      const partialResponse = await fetch(modelPath, {
-        headers: { 'Range': 'bytes=0-1023' }
-      });
-      
-      if (partialResponse.ok) {
-        const buffer = await partialResponse.arrayBuffer();
-        const view = new Uint8Array(buffer);
-        
-        // Check for ONNX magic bytes (first 4 bytes should be ONNX header)
-        if (view.length >= 4) {
-          const magic = String.fromCharCode(...view.slice(0, 4));
-          if (!magic.includes('ONNX') && view[0] !== 0x08) {
-            console.warn('Invalid ONNX file format detected');
-            return false;
-          }
-        }
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Model integrity verification failed:', error);
-      return false;
+  private async tryFallbackModel(): Promise<boolean> {
+    if (this.modelState.fallbackIndex >= this.integrity.fallbackModels.length) {
+      return false; // No more fallbacks available
     }
+
+    const fallbackModel = this.integrity.fallbackModels[this.modelState.fallbackIndex];
+    console.log(`🔄 Trying fallback model: ${fallbackModel}`);
+    
+    this.modelState.currentModel = fallbackModel;
+    this.modelState.currentModelName = `Fallback Model ${this.modelState.fallbackIndex + 1}`;
+    this.modelState.fallbackIndex++;
+    
+    return true;
   }
 
   private async verifyModelFunctionality(): Promise<void> {
@@ -404,56 +410,28 @@ export class ObjectDetector {
     }
 
     try {
-      // Create a minimal test tensor (1x3x64x64)
-      const testData = new Float32Array(1 * 3 * 64 * 64).fill(0.5);
-      const testTensor = new ort.Tensor('float32', testData, [1, 3, 64, 64]);
+      // Create test input tensor
+      const testData = new Float32Array(1 * 3 * 640 * 640).fill(0.5);
+      const testTensor = new ort.Tensor('float32', testData, [1, 3, 640, 640]);
       
-      // Run a test inference with timeout
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Model functionality test timeout')), 5000);
-      });
+      // Run test inference
+      const startTime = performance.now();
+      const results = await this.session.run({ images: testTensor });
+      const inferenceTime = performance.now() - startTime;
       
-      const testPromise = this.session.run({ images: testTensor });
-      await Promise.race([testPromise, timeoutPromise]);
+      console.log(`✅ Model functionality verified (${inferenceTime.toFixed(2)}ms)`);
       
-      console.log('✅ Model functionality verified');
+      // Verify output shape
+      const output = results.output0;
+      if (!output || !output.dims) {
+        throw new Error('Invalid model output');
+      }
+      
+      console.log(`📊 Model output shape: [${output.dims.join(', ')}]`);
+      
     } catch (error) {
-      throw new Error(`Model functionality test failed: ${error}`);
+      throw new Error(`Model functionality verification failed: ${error}`);
     }
-  }
-
-  private async tryFallbackModel(): Promise<boolean> {
-    if (this.modelState.fallbackIndex >= this.integrity.fallbackModels.length) {
-      console.error('No more fallback models available');
-      return false;
-    }
-
-    const fallbackModel = this.integrity.fallbackModels[this.modelState.fallbackIndex];
-    console.log(`Trying fallback model: ${fallbackModel}`);
-    
-    this.modelState.currentModel = fallbackModel;
-    this.modelState.fallbackIndex++;
-    
-    return true;
-  }
-
-  private isCorruptionError(error: any): boolean {
-    const corruptionIndicators = [
-      'corrupted',
-      'invalid format',
-      'malformed',
-      'unexpected end',
-      'magic number',
-      'checksum',
-      'verification failed'
-    ];
-    
-    const errorMessage = error?.message?.toLowerCase() || '';
-    return corruptionIndicators.some(indicator => errorMessage.includes(indicator));
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async detect(imageData: ImageData): Promise<Detection[]> {
@@ -532,7 +510,7 @@ export class ObjectDetector {
       
       // Update performance metrics
       const inferenceTime = performance.now() - inferenceStart;
-      this.updatePerformanceMetrics(inferenceTime, detections.length);
+      this.updatePerformanceMetrics({ inferenceTime });
       
       // Reset failure count on successful detection
       this.modelState.failureCount = 0;
@@ -815,32 +793,6 @@ export class ObjectDetector {
       default:
         return 'Please dispose of this item according to your local waste management guidelines.';
     }
-  }
-
-  private updatePerformanceMetrics(inferenceTime: number, objectCount: number): void {
-    // Calculate FPS estimate
-    const currentTime = Date.now();
-    const timeSinceLastInference = currentTime - this.lastInferenceTime;
-    const estimatedFPS = timeSinceLastInference > 0 ? 1000 / timeSinceLastInference : 0;
-    
-    this.lastInferenceTime = currentTime;
-    
-    // Update inference history
-    this.inferenceHistory.push(inferenceTime);
-    if (this.inferenceHistory.length > 10) {
-      this.inferenceHistory.shift();
-    }
-    
-    // Calculate average inference time
-    const averageInferenceTime = this.inferenceHistory.reduce((a, b) => a + b, 0) / this.inferenceHistory.length;
-    
-    // Update adaptive engine
-    const adaptiveEngine = getAdaptiveEngine();
-    adaptiveEngine.updatePerformanceMetrics({
-      fps: estimatedFPS,
-      averageInferenceTime,
-      errors: this.modelState.failureCount
-    });
   }
 
   private estimateMemoryUsage(): number {
