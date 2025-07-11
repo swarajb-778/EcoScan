@@ -1,7 +1,7 @@
 {
 	"name": "ecoscan",
 	"version": "1.0.0",
-	"description": "AI-powered waste classification using computer vision and voice recognition",
+	"description": "AI-powered waste classification using computer vision and voice recognition with real-time detection, automatic error recovery, and performance optimization",
 	"keywords": [
 		"ai",
 		"machine-learning",
@@ -12,7 +12,17 @@
 		"svelte",
 		"typescript",
 		"sustainability",
-		"environment"
+		"environment",
+		"onnx",
+		"yolo",
+		"object-detection",
+		"error-recovery",
+		"performance-optimization",
+		"diagnostics",
+		"real-time",
+		"webgl",
+		"healthcare",
+		"green-tech"
 	],
 	"author": {
 		"name": "EcoScan Team",
