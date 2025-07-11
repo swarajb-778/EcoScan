@@ -141,11 +141,44 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [SvelteKit](https://kit.svelte.dev/) for the amazing framework
 - Environmental organizations promoting sustainable practices
 
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+**Camera not working:**
+- Ensure HTTPS is enabled (required for camera access)
+- Check browser permissions for camera access
+- Close other applications using the camera
+
+**AI models not loading:**
+- Check network connection
+- Ensure sufficient device memory (2GB+ recommended)
+- Try refreshing the page
+- Use the diagnostic panel (click 🔧 in footer) for detailed information
+
+**Performance issues:**
+- Close unnecessary browser tabs
+- Use the performance optimization system (auto-enabled)
+- Consider using a more powerful device for better experience
+
+**Application errors:**
+- The app includes automatic error recovery
+- Check the diagnostic panel for system health
+- Try the "Auto Recovery" feature if errors persist
+
+### Performance Optimization
+
+The application automatically optimizes based on your device:
+- **High-end devices**: Full features with WebGL acceleration
+- **Mid-range devices**: Balanced performance and quality
+- **Low-end devices**: Reduced quality for better performance
+
 ## 📞 Support
 
 - Create an [Issue](https://github.com/yourusername/ecoscan/issues) for bug reports
 - Start a [Discussion](https://github.com/yourusername/ecoscan/discussions) for questions
 - Check the [Wiki](https://github.com/yourusername/ecoscan/wiki) for detailed documentation
+- Use the built-in diagnostic panel for system health information
 
 ---
 
