@@ -3,11 +3,13 @@
   import { page } from '$app/stores';
   import { initializeAnalytics, trackEvent } from '$lib/utils/analytics';
   import { isLoading, hasDetections } from '$lib/stores/appStore';
+  import DiagnosticPanel from '$lib/components/DiagnosticPanel.svelte';
   import '../app.css';
 
   let showMobileMenu = false;
   let installPrompt: any = null;
   let isInstallable = false;
+  let showDiagnostics = false;
 
   onMount(() => {
     if (typeof window !== 'undefined') {
@@ -210,6 +212,17 @@
 
           <!-- Links -->
           <div class="flex items-center space-x-3 text-sm">
+            <button 
+              on:click={() => {
+                showDiagnostics = true;
+                trackEvent('interaction', 'diagnostic_panel_open', 'footer');
+              }}
+              class="text-gray-600 hover:text-blue-600 transition-colors flex items-center space-x-1"
+              title="System Diagnostics"
+            >
+              <span>🔧</span>
+              <span class="hidden sm:inline">Diagnostics</span>
+            </button>
             <a href="/privacy" class="text-gray-600 hover:text-green-600 transition-colors">Privacy</a>
             <a href="/help" class="text-gray-600 hover:text-green-600 transition-colors">Help</a>
             <a 
@@ -237,6 +250,9 @@
     </div>
   {/if}
 </div>
+
+<!-- Diagnostic Panel -->
+<DiagnosticPanel bind:showPanel={showDiagnostics} />
 
 <style>
   /* Ensure smooth transitions */
