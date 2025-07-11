@@ -1,5 +1,7 @@
 import { writable } from 'svelte/store';
 import { performanceMonitor } from '$lib/utils/performance';
+import { diagnostic } from '$lib/utils/diagnostic.js';
+import { errorRecovery } from '$lib/utils/error-recovery.js';
 
 export interface AppError {
   id: string;
@@ -63,9 +65,16 @@ function createErrorStore() {
         error
       };
 
-      // Record error for performance monitoring
+      // Record error for performance monitoring and diagnostics
       if (error) {
+        diagnostic.logError(`${message}: ${error.message}`, context || 'AppError');
         console.error('Application error:', error, context);
+      } else {
+        if (type === 'error') {
+          diagnostic.logError(message, context || 'AppError');
+        } else if (type === 'warning') {
+          diagnostic.logWarning(message, context || 'AppError');
+        }
       }
 
       update(state => {
@@ -194,6 +203,92 @@ function createErrorStore() {
     handleGenericError(error: Error, context?: string) {
       const message = error.message || 'An unexpected error occurred';
       return this.error(message, { context, error });
+    },
+
+    /**
+     * Attempt automatic error recovery
+     */
+    async attemptRecovery(errorId: string) {
+      let errorToRecover: AppError | undefined;
+      
+      const currentState = new Promise<ErrorState>((resolve) => {
+        const unsubscribe = this.subscribe((state) => {
+          unsubscribe();
+          resolve(state);
+        });
+      });
+      
+      const state = await currentState;
+      errorToRecover = [...state.errors, ...state.toasts].find(e => e.id === errorId);
+      
+      if (!errorToRecover) {
+        diagnostic.logWarning(`Error ${errorId} not found for recovery`, 'ErrorStore');
+        return false;
+      }
+
+      diagnostic.logWarning(`Attempting recovery for error: ${errorToRecover.message}`, 'ErrorStore');
+      
+      try {
+        const recoveryResult = await errorRecovery.recoverFromError(
+          errorToRecover.message, 
+          errorToRecover.context
+        );
+        
+        if (recoveryResult.success) {
+          // Remove the original error
+          this.dismissError(errorId);
+          
+          // Show success message
+          this.info('Issue resolved automatically', { context: 'recovery' });
+          
+          diagnostic.logWarning(`Recovery successful for error: ${errorToRecover.message}`, 'ErrorStore');
+          return true;
+        } else {
+          // Show recovery failure with recommendations
+          const recommendations = recoveryResult.recommendations.join(' ');
+          this.warning(`Auto-recovery failed: ${recommendations}`, { context: 'recovery' });
+          
+          diagnostic.logError(`Recovery failed for error: ${errorToRecover.message}`, 'ErrorStore');
+          return false;
+        }
+      } catch (recoveryError) {
+        diagnostic.logError(`Recovery attempt threw error: ${recoveryError}`, 'ErrorStore');
+        this.error('Recovery system failed', { context: 'recovery', error: recoveryError as Error });
+        return false;
+      }
+    },
+
+    /**
+     * Generate diagnostic report for all errors
+     */
+    generateErrorReport() {
+      return new Promise<any>((resolve) => {
+        const unsubscribe = this.subscribe((state) => {
+          unsubscribe();
+          const report = {
+            timestamp: new Date().toISOString(),
+            errorCount: state.errors.length,
+            toastCount: state.toasts.length,
+            errors: state.errors.map(e => ({
+              id: e.id,
+              message: e.message,
+              type: e.type,
+              context: e.context,
+              timestamp: e.timestamp
+            })),
+            toasts: state.toasts.map(t => ({
+              id: t.id,
+              message: t.message,
+              type: t.type,
+              context: t.context,
+              timestamp: t.timestamp
+            })),
+            recoveryHistory: errorRecovery.getRecoveryHistory(),
+            recoveryStats: errorRecovery.generateRecoveryReport()
+          };
+          resolve(report);
+        });
+      });
     }
   };
 }
