@@ -17,6 +17,7 @@
     isCameraActive,
     loadingState
   } from '$lib/stores/appStore.js';
+  import { errorStore } from '$lib/stores/errorStore.js';
   import type { Detection, ModelConfig } from '$lib/types/index.js';
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
   import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
@@ -38,6 +39,7 @@
   let frameCount = 0;
   let mountStartTime = 0;
   let captureFlashOpacity = 0;
+  let isMLReady = false;
 
   // Local component state for SSR safety
   let localIsLoading = false;
@@ -129,52 +131,42 @@
     perf.start('mlInitialization');
     
     try {
-      // Initialize models with timeout protection and individual tracking
-      const initPromise = Promise.all([
+      // Initialize detector and classifier in parallel
+      await Promise.all([
         initializeDetector(),
         initializeClassifier()
       ]);
-      
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Model loading timeout (30s)')), 30000);
-      });
-      
-      await Promise.race([initPromise, timeoutPromise]);
-      
-      // Record successful initialization
-      const totalTime = perf.end('mlInitialization', 'ml');
-      console.log(`🚀 ML models loaded in ${totalTime.toFixed(0)}ms`);
-      
-      // Update legacy performance metric for compatibility
-      updatePerformanceMetric('modelLoadTime', totalTime);
-      
-      setSuccess('AI models loaded successfully');
-      
+
+      isMLReady = true;
+      diagnostic.logWarning('ML initialization completed successfully', 'CameraView');
     } catch (error) {
-      const errorMessage = `Failed to load AI models: ${error}`;
-      diagnostic.logError(`ML initialization error: ${error}`, 'CameraView');
+      const errorMsg = `Failed to load AI models: ${error}`;
+      diagnostic.logError(errorMsg, 'CameraView');
       
-      // Record failed initialization
-      perf.end('mlInitialization', 'ml');
-      perf.record('mlInitializationFailed', 1, 'count', 'ml');
+      // Use enhanced error recovery
+      const recovered = await errorRecovery.attemptRecovery(errorMsg);
       
-      // Attempt automatic error recovery
-      const recoveryResult = await errorRecovery.recoverFromError(errorMessage, 'ML Initialization');
-      if (recoveryResult.success) {
+      if (recovered) {
         diagnostic.logWarning('ML initialization recovered successfully', 'CameraView');
-        // Retry initialization
+        // Retry initialization after recovery
         try {
-          await initializeML();
+          await Promise.all([
+            initializeDetector(),
+            initializeClassifier()
+          ]);
+          
+          isMLReady = true;
+          diagnostic.logWarning('ML initialization successful after recovery', 'CameraView');
           return;
         } catch (retryError) {
           diagnostic.logError(`ML initialization retry failed: ${retryError}`, 'CameraView');
         }
       }
       
-      localError = errorMessage;
-      setError(errorMessage);
-      throw error;
+      // If recovery failed, update error store
+      errorStore.error(errorMsg, {
+        context: 'CameraView ML initialization'
+      });
     } finally {
       localIsLoading = false;
       setLoadingState(false);
