@@ -22,6 +22,8 @@
   import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
   import FallbackDetection from './FallbackDetection.svelte';
   import { getOfflineManager, offlineStatus, isOfflineMode } from '$lib/utils/offline-manager.js';
+  import { diagnostic } from '$lib/utils/diagnostic.js';
+  import { safeAsyncOperation, isSecureContext, initializeClientFeatures } from '$lib/utils/ssr-safe.js';
 
   // Component state
   let videoElement: HTMLVideoElement;
@@ -56,42 +58,47 @@
   $: browserError = isBrowser() ? $error : localError;
   $: browserPermissionsGranted = isBrowser() ? $permissionsGranted : localPermissionsGranted;
 
-  // Component lifecycle with performance monitoring
+  // Component lifecycle with performance monitoring and diagnostics
   onMount(async () => {
     if (!isBrowser()) {
-      console.warn('🚫 CameraView: Skipping initialization during SSR');
+      diagnostic.logWarning('Skipping CameraView initialization during SSR', 'CameraView');
       return;
     }
     
     mountStartTime = performance.now();
-    console.log('🎬 CameraView: Starting component initialization with performance tracking...');
+    diagnostic.logWarning('Starting CameraView initialization with performance tracking', 'CameraView');
     
-    // Initialize performance monitoring
-    perf.start('componentMount');
-    
-    try {
-      // Initialize ML models first
-      await initializeML();
-      
-      // Check existing permissions and potentially auto-start camera
-      await checkExistingPermissions();
-      
-      const mountTime = perf.end('componentMount', 'ui');
-      console.log(`✅ CameraView: Component initialized in ${mountTime.toFixed(0)}ms`);
-      
-      // Update both new and legacy performance metrics
-      updatePerformanceMetric('componentMountTime', mountTime);
-      
-      // Generate initial performance snapshot
-      const snapshot = perf.snapshot();
-      console.log('📊 Initial performance snapshot:', snapshot.summary);
-      
-    } catch (error) {
-      console.error('❌ CameraView: Initialization failed:', error);
-      perf.end('componentMount', 'ui');
-      perf.record('componentMountFailed', 1, 'count', 'ui');
-      setError(`Component initialization failed: ${error}`);
+    // Check security context first
+    if (!isSecureContext()) {
+      diagnostic.logError('Insecure context detected - camera access requires HTTPS', 'CameraView');
+      setError('Camera access requires HTTPS. Please use https:// or localhost.');
+      return;
     }
+    
+    // Initialize in client features wrapper for DOM safety
+    initializeClientFeatures(async () => {
+      // Initialize performance monitoring
+      perf.start('componentMount');
+      
+      await safeAsyncOperation(async () => {
+        // Initialize ML models first
+        await initializeML();
+        
+        // Check existing permissions and potentially auto-start camera
+        await checkExistingPermissions();
+        
+        const mountTime = perf.end('componentMount', 'ui');
+        diagnostic.logWarning(`CameraView initialized successfully in ${mountTime.toFixed(0)}ms`, 'CameraView');
+        
+        // Update both new and legacy performance metrics
+        updatePerformanceMetric('componentMountTime', mountTime);
+        
+        // Generate initial performance snapshot
+        const snapshot = perf.snapshot();
+        diagnostic.logWarning(`Initial performance snapshot: ${JSON.stringify(snapshot.summary)}`, 'CameraView');
+        
+      }, undefined, 'CameraView Initialization');
+    });
   });
 
   onDestroy(() => {
