@@ -5,8 +5,19 @@ import { getAdaptiveEngine, type OptimizationStrategy } from './adaptive-engine.
 import { abTestingFramework } from '$lib/utils/ab-testing.js';
 import { modelExperiment } from '$lib/experiments';
 import { isBrowser } from '../utils/browser.js';
+import { diagnostic } from '../utils/diagnostic.js';
+import { safeAsyncOperation, safeSyncOperation, isSecureContext } from '../utils/ssr-safe.js';
 
-ort.env.wasm.wasmPaths = '/models/';
+// Configure ONNX Runtime with proper error handling
+if (isBrowser()) {
+  try {
+    ort.env.wasm.wasmPaths = '/models/';
+    ort.env.wasm.numThreads = 1; // Conservative thread count for compatibility
+    diagnostic.logWarning('ONNX Runtime configured successfully', 'ObjectDetector');
+  } catch (error) {
+    diagnostic.logError(`Failed to configure ONNX Runtime: ${error}`, 'ObjectDetector');
+  }
+}
 
 // Model integrity and fallback configuration
 interface ModelIntegrity {
