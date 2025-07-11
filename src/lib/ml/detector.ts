@@ -7,16 +7,15 @@ import { modelExperiment } from '$lib/experiments';
 import { isBrowser } from '../utils/browser.js';
 import { diagnostic } from '../utils/diagnostic.js';
 import { safeAsyncOperation, safeSyncOperation, isSecureContext } from '../utils/ssr-safe.js';
+import { onnxManager } from './onnx-config.js';
 
-// Configure ONNX Runtime with proper error handling
+// Configure ONNX Runtime with the manager for enhanced error handling
 if (isBrowser()) {
-  try {
-    ort.env.wasm.wasmPaths = '/models/';
-    ort.env.wasm.numThreads = 1; // Conservative thread count for compatibility
-    diagnostic.logWarning('ONNX Runtime configured successfully', 'ObjectDetector');
-  } catch (error) {
-    diagnostic.logError(`Failed to configure ONNX Runtime: ${error}`, 'ObjectDetector');
-  }
+  onnxManager.initialize().then(() => {
+    diagnostic.logWarning('ONNX Runtime initialized via manager', 'ObjectDetector');
+  }).catch(error => {
+    diagnostic.logError(`ONNX Runtime manager initialization failed: ${error}`, 'ObjectDetector');
+  });
 }
 
 // Model integrity and fallback configuration
