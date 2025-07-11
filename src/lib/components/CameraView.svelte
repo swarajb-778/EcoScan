@@ -24,6 +24,7 @@
   import { getOfflineManager, offlineStatus, isOfflineMode } from '$lib/utils/offline-manager.js';
   import { diagnostic } from '$lib/utils/diagnostic.js';
   import { safeAsyncOperation, isSecureContext, initializeClientFeatures } from '$lib/utils/ssr-safe.js';
+  import { errorRecovery } from '$lib/utils/error-recovery.js';
 
   // Component state
   let videoElement: HTMLVideoElement;
@@ -152,11 +153,24 @@
       
     } catch (error) {
       const errorMessage = `Failed to load AI models: ${error}`;
-      console.error('❌ ML initialization error:', error);
+      diagnostic.logError(`ML initialization error: ${error}`, 'CameraView');
       
       // Record failed initialization
       perf.end('mlInitialization', 'ml');
       perf.record('mlInitializationFailed', 1, 'count', 'ml');
+      
+      // Attempt automatic error recovery
+      const recoveryResult = await errorRecovery.recoverFromError(errorMessage, 'ML Initialization');
+      if (recoveryResult.success) {
+        diagnostic.logWarning('ML initialization recovered successfully', 'CameraView');
+        // Retry initialization
+        try {
+          await initializeML();
+          return;
+        } catch (retryError) {
+          diagnostic.logError(`ML initialization retry failed: ${retryError}`, 'CameraView');
+        }
+      }
       
       localError = errorMessage;
       setError(errorMessage);
