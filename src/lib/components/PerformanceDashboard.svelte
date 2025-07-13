@@ -1,98 +1,98 @@
+<!--
+  Performance Dashboard Component
+  Displays real-time performance metrics, device information, and optimization controls
+-->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { 
-    performanceOptimizer, 
-    type PerformanceMetrics, 
-    type OptimizationProfile,
-    type PerformanceReport
+    performanceMetrics, 
+    currentProfile, 
+    performanceScore, 
+    performanceTrend, 
+    deviceInfo,
+    optimizationRecommendations,
+    advancedPerformanceOptimizer 
   } from '$lib/utils/advanced-performance-optimizer';
 
-  // Reactive stores
-  let currentMetrics: PerformanceMetrics | null = null;
-  let activeProfile: OptimizationProfile;
-  let performanceReport: PerformanceReport | null = null;
-  let metricsHistory: PerformanceMetrics[] = [];
-  
   // Component state
-  let isExpanded = false;
-  let showAdvancedMetrics = false;
-  let autoOptimizeEnabled = true;
-  let selectedTab: 'metrics' | 'profile' | 'report' = 'metrics';
-  
-  // Chart data
-  let fpsData: number[] = [];
-  let inferenceData: number[] = [];
-  let memoryData: number[] = [];
-  
-  // Unsubscribe functions
-  let unsubscribeFunctions: (() => void)[] = [];
+  let activeTab = 'metrics';
+  let isMinimized = false;
+  let showExportModal = false;
+  let chartData: any[] = [];
+  let updateInterval: NodeJS.Timeout;
+
+  // Performance data for charts
+  let fpsHistory: number[] = [];
+  let inferenceHistory: number[] = [];
+  let memoryHistory: number[] = [];
+  let cpuHistory: number[] = [];
+
+  // Reactive values
+  $: score = $performanceScore;
+  $: trend = $performanceTrend;
+  $: metrics = $performanceMetrics;
+  $: profile = $currentProfile;
+  $: device = $deviceInfo;
+  $: recommendations = $optimizationRecommendations;
+
+  // Color scheme based on performance score
+  $: scoreColor = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444';
+  $: trendColor = trend.trend === 'improving' ? '#10b981' : trend.trend === 'degrading' ? '#ef4444' : '#6b7280';
 
   onMount(() => {
-    // Subscribe to performance stores
-    const unsubscribeMetrics = performanceOptimizer.currentMetrics.subscribe(metrics => {
-      currentMetrics = metrics;
-      if (metrics) {
-        updateChartData(metrics);
-      }
-    });
-    
-    const unsubscribeProfile = performanceOptimizer.activeProfile.subscribe(profile => {
-      activeProfile = profile;
-    });
-    
-    const unsubscribeReport = performanceOptimizer.performanceReport.subscribe(report => {
-      performanceReport = report;
-    });
-    
-    unsubscribeFunctions.push(unsubscribeMetrics, unsubscribeProfile, unsubscribeReport);
-    
-    // Start performance monitoring
-    performanceOptimizer.startMonitoring();
-    
-    // Get initial metrics history
-    metricsHistory = performanceOptimizer.getMetricsHistory();
+    // Update charts every second
+    updateInterval = setInterval(() => {
+      updateChartData();
+    }, 1000);
+
+    // Listen for profile changes
+    const handleProfileChange = (event: CustomEvent) => {
+      console.log('Profile changed:', event.detail);
+    };
+
+    window.addEventListener('profile-changed', handleProfileChange as EventListener);
+
+    return () => {
+      clearInterval(updateInterval);
+      window.removeEventListener('profile-changed', handleProfileChange as EventListener);
+    };
   });
 
   onDestroy(() => {
-    unsubscribeFunctions.forEach(fn => fn());
-    performanceOptimizer.stopMonitoring();
+    if (updateInterval) {
+      clearInterval(updateInterval);
+    }
   });
 
-  function updateChartData(metrics: PerformanceMetrics) {
-    fpsData = [...fpsData, metrics.fps].slice(-20);
-    inferenceData = [...inferenceData, metrics.inferenceTime].slice(-20);
-    memoryData = [...memoryData, metrics.memoryUsage].slice(-20);
+  function updateChartData() {
+    // Update history arrays (keep last 50 data points)
+    fpsHistory = [...fpsHistory.slice(-49), metrics.fps];
+    inferenceHistory = [...inferenceHistory.slice(-49), metrics.inferenceTime];
+    memoryHistory = [...memoryHistory.slice(-49), metrics.memoryUsage * 100];
+    cpuHistory = [...cpuHistory.slice(-49), metrics.cpuUsage * 100];
   }
 
-  function handleProfileChange(profileId: string) {
-    performanceOptimizer.setOptimizationProfile(profileId);
+  function switchProfile(profileName: string) {
+    advancedPerformanceOptimizer.switchToProfile(profileName);
   }
 
-  function getPerformanceColor(score: number): string {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
+  function applyRecommendation(recommendation: any) {
+    recommendation.action();
   }
 
-  function getStatusColor(value: number, threshold: number, inverted = false): string {
-    const isGood = inverted ? value > threshold : value < threshold;
-    return isGood ? 'text-green-600' : 'text-red-600';
-  }
+  function exportData() {
+    const data = {
+      timestamp: new Date().toISOString(),
+      currentMetrics: metrics,
+      performanceScore: score,
+      trend: trend,
+      deviceInfo: device,
+      fpsHistory,
+      inferenceHistory,
+      memoryHistory,
+      cpuHistory
+    };
 
-  function formatNumber(value: number, decimals = 1): string {
-    return value.toFixed(decimals);
-  }
-
-  function getTrendIcon(trend: string): string {
-    switch (trend) {
-      case 'improving': return '📈';
-      case 'degrading': return '📉';
-      default: return '📊';
-    }
-  }
-
-  function exportPerformanceData() {
-    const data = performanceOptimizer.exportPerformanceData();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -100,450 +100,466 @@
     a.download = `ecoscan-performance-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    
+    showExportModal = false;
   }
 
-  function getBatteryIcon(level?: number): string {
-    if (!level) return '🔋';
+  // Chart rendering function (simplified SVG charts)
+  function renderChart(data: number[], width: number, height: number, color: string) {
+    if (data.length < 2) return '';
+    
+    const maxValue = Math.max(...data);
+    const minValue = Math.min(...data);
+    const range = maxValue - minValue || 1;
+    
+    let path = '';
+    data.forEach((value, index) => {
+      const x = (index / (data.length - 1)) * width;
+      const y = height - ((value - minValue) / range) * height;
+      path += index === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+    });
+    
+    return `<path d="${path}" stroke="${color}" stroke-width="2" fill="none" />`;
+  }
+
+  // Format utilities
+  function formatNumber(num: number, decimals = 1): string {
+    return num.toFixed(decimals);
+  }
+
+  function formatPercentage(num: number): string {
+    return `${Math.round(num * 100)}%`;
+  }
+
+  function formatBytes(bytes: number): string {
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    if (bytes === 0) return '0 B';
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
+  }
+
+  function getBatteryIcon(level: number): string {
     if (level > 0.75) return '🔋';
     if (level > 0.5) return '🔋';
     if (level > 0.25) return '🪫';
     return '🪫';
   }
 
-  function getNetworkIcon(speed: string): string {
-    switch (speed) {
-      case 'fast': return '📶';
-      case 'slow': return '📶';
-      default: return '📶';
-    }
-  }
-
-  function getDeviceTierIcon(tier: string): string {
-    switch (tier) {
-      case 'high': return '🚀';
-      case 'mid': return '⚡';
-      case 'low': return '🐌';
-      default: return '⚡';
-    }
+  function getNetworkIcon(speed: number): string {
+    if (speed > 10) return '📶';
+    if (speed > 5) return '📶';
+    if (speed > 1) return '📶';
+    return '📶';
   }
 </script>
 
-<div class="performance-dashboard">
-  <!-- Dashboard Header -->
+<div class="performance-dashboard" class:minimized={isMinimized}>
+  <!-- Header -->
   <div class="dashboard-header">
-    <button 
-      class="dashboard-toggle"
-      on:click={() => isExpanded = !isExpanded}
-      aria-expanded={isExpanded}
-    >
-      <span class="dashboard-icon">⚡</span>
-      <span class="dashboard-title">Performance</span>
-      <span class="dashboard-arrow" class:expanded={isExpanded}>▼</span>
-    </button>
-    
-    {#if currentMetrics}
-      <div class="quick-metrics">
-        <span class="metric-item">
-          <span class="metric-label">FPS:</span>
-          <span class="metric-value" class:good={currentMetrics.fps >= 15}>
-            {formatNumber(currentMetrics.fps, 0)}
-          </span>
-        </span>
-        <span class="metric-item">
-          <span class="metric-label">Inference:</span>
-          <span class="metric-value" class:good={currentMetrics.inferenceTime <= 100}>
-            {formatNumber(currentMetrics.inferenceTime, 0)}ms
-          </span>
-        </span>
-        <span class="metric-item">
-          <span class="metric-label">Memory:</span>
-          <span class="metric-value" class:good={currentMetrics.memoryUsage <= 200}>
-            {formatNumber(currentMetrics.memoryUsage, 0)}MB
-          </span>
-        </span>
+    <div class="header-left">
+      <h3>⚡ Performance Dashboard</h3>
+      <div class="score-badge" style="background: {scoreColor}20; color: {scoreColor}; border-color: {scoreColor};">
+        Score: {score}/100
       </div>
-    {/if}
+      <div class="trend-badge" style="color: {trendColor};">
+        {trend.trend === 'improving' ? '📈' : trend.trend === 'degrading' ? '📉' : '➡️'}
+        {trend.trend}
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-sm" on:click={() => showExportModal = true}>
+        📊 Export
+      </button>
+      <button class="btn btn-sm" on:click={() => isMinimized = !isMinimized}>
+        {isMinimized ? '⬆️' : '⬇️'}
+      </button>
+    </div>
   </div>
 
-  <!-- Expanded Dashboard -->
-  {#if isExpanded}
-    <div class="dashboard-content">
-      <!-- Tab Navigation -->
-      <div class="tab-navigation">
-        <button 
-          class="tab-button" 
-          class:active={selectedTab === 'metrics'}
-          on:click={() => selectedTab = 'metrics'}
-        >
-          📊 Metrics
-        </button>
-        <button 
-          class="tab-button" 
-          class:active={selectedTab === 'profile'}
-          on:click={() => selectedTab = 'profile'}
-        >
-          ⚙️ Profile
-        </button>
-        <button 
-          class="tab-button" 
-          class:active={selectedTab === 'report'}
-          on:click={() => selectedTab = 'report'}
-        >
-          📈 Report
-        </button>
-      </div>
+  {#if !isMinimized}
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab" class:active={activeTab === 'metrics'} on:click={() => activeTab = 'metrics'}>
+        📊 Metrics
+      </button>
+      <button class="tab" class:active={activeTab === 'profiles'} on:click={() => activeTab = 'profiles'}>
+        ⚙️ Profiles
+      </button>
+      <button class="tab" class:active={activeTab === 'recommendations'} on:click={() => activeTab = 'recommendations'}>
+        💡 Recommendations
+      </button>
+      <button class="tab" class:active={activeTab === 'device'} on:click={() => activeTab = 'device'}>
+        📱 Device
+      </button>
+    </div>
 
-      <!-- Metrics Tab -->
-      {#if selectedTab === 'metrics'}
+    <!-- Tab Content -->
+    <div class="tab-content">
+      {#if activeTab === 'metrics'}
         <div class="metrics-tab">
-          {#if currentMetrics}
-            <div class="metrics-grid">
-              <!-- Core Metrics -->
-              <div class="metric-card">
-                <div class="metric-header">
-                  <span class="metric-icon">🎯</span>
-                  <h3>Frame Rate</h3>
-                </div>
-                <div class="metric-value-large {getStatusColor(currentMetrics.fps, 15, true)}">
-                  {formatNumber(currentMetrics.fps, 1)} FPS
-                </div>
-                <div class="metric-target">Target: {activeProfile.targetFPS} FPS</div>
-              </div>
+          <!-- Performance Score Circle -->
+          <div class="score-circle">
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#e5e7eb" stroke-width="8"/>
+              <circle 
+                cx="60" 
+                cy="60" 
+                r="50" 
+                fill="none" 
+                stroke="{scoreColor}" 
+                stroke-width="8"
+                stroke-dasharray="314.16"
+                stroke-dashoffset="{314.16 - (score / 100) * 314.16}"
+                stroke-linecap="round"
+                transform="rotate(-90 60 60)"
+              />
+              <text x="60" y="65" text-anchor="middle" class="score-text">{score}</text>
+            </svg>
+          </div>
 
-              <div class="metric-card">
-                <div class="metric-header">
-                  <span class="metric-icon">⚡</span>
-                  <h3>Inference Time</h3>
-                </div>
-                <div class="metric-value-large {getStatusColor(currentMetrics.inferenceTime, 100)}">
-                  {formatNumber(currentMetrics.inferenceTime, 0)}ms
-                </div>
-                <div class="metric-target">Target: {activeProfile.maxInferenceTime}ms</div>
+          <!-- Real-time Metrics -->
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-icon">🎯</span>
+                <span class="metric-title">FPS</span>
               </div>
-
-              <div class="metric-card">
-                <div class="metric-header">
-                  <span class="metric-icon">🧠</span>
-                  <h3>Memory Usage</h3>
-                </div>
-                <div class="metric-value-large {getStatusColor(currentMetrics.memoryUsage, 200)}">
-                  {formatNumber(currentMetrics.memoryUsage, 0)}MB
-                </div>
-                <div class="metric-target">Target: &lt;200MB</div>
-              </div>
-
-              <!-- System Info -->
-              <div class="metric-card">
-                <div class="metric-header">
-                  <span class="metric-icon">📱</span>
-                  <h3>Device Info</h3>
-                </div>
-                <div class="device-info">
-                  <div class="device-item">
-                    <span>{getDeviceTierIcon(currentMetrics.deviceTier)}</span>
-                    <span>Tier: {currentMetrics.deviceTier}</span>
-                  </div>
-                  <div class="device-item">
-                    <span>{getNetworkIcon(currentMetrics.networkSpeed)}</span>
-                    <span>Network: {currentMetrics.networkSpeed}</span>
-                  </div>
-                  {#if currentMetrics.batteryLevel}
-                    <div class="device-item">
-                      <span>{getBatteryIcon(currentMetrics.batteryLevel)}</span>
-                      <span>Battery: {Math.round(currentMetrics.batteryLevel * 100)}%</span>
-                    </div>
-                  {/if}
-                </div>
+              <div class="metric-value">{formatNumber(metrics.fps)}</div>
+              <div class="metric-chart">
+                <svg width="200" height="40" viewBox="0 0 200 40">
+                  {@html renderChart(fpsHistory, 200, 40, '#10b981')}
+                </svg>
               </div>
             </div>
 
-            <!-- Performance Charts -->
-            {#if showAdvancedMetrics}
-              <div class="charts-section">
-                <h3>Performance Trends</h3>
-                <div class="charts-grid">
-                  <div class="chart-card">
-                    <h4>FPS History</h4>
-                    <div class="chart-placeholder">
-                      <div class="chart-line">
-                        {#each fpsData as fps, i}
-                          <div class="chart-point" style="height: {Math.min(fps * 2, 60)}px"></div>
-                        {/each}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="chart-card">
-                    <h4>Inference Time History</h4>
-                    <div class="chart-placeholder">
-                      <div class="chart-line">
-                        {#each inferenceData as inference, i}
-                          <div class="chart-point" style="height: {Math.min(inference / 2, 60)}px"></div>
-                        {/each}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="chart-card">
-                    <h4>Memory Usage History</h4>
-                    <div class="chart-placeholder">
-                      <div class="chart-line">
-                        {#each memoryData as memory, i}
-                          <div class="chart-point" style="height: {Math.min(memory / 3, 60)}px"></div>
-                        {/each}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-icon">⚡</span>
+                <span class="metric-title">Inference Time</span>
               </div>
-            {/if}
-
-            <!-- Advanced Metrics Toggle -->
-            <div class="advanced-toggle">
-              <button 
-                class="toggle-button"
-                on:click={() => showAdvancedMetrics = !showAdvancedMetrics}
-              >
-                {showAdvancedMetrics ? '📊 Hide Charts' : '📈 Show Charts'}
-              </button>
-            </div>
-          {:else}
-            <div class="loading-state">
-              <span class="loading-icon">⏱️</span>
-              <span>Collecting performance metrics...</span>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- Profile Tab -->
-      {#if selectedTab === 'profile'}
-        <div class="profile-tab">
-          <h3>Optimization Profile</h3>
-          <div class="profile-grid">
-            {#each performanceOptimizer.getOptimizationProfiles() as profile}
-              <div class="profile-card" class:active={activeProfile.id === profile.id}>
-                <div class="profile-header">
-                  <input 
-                    type="radio" 
-                    name="profile" 
-                    value={profile.id}
-                    checked={activeProfile.id === profile.id}
-                    on:change={() => handleProfileChange(profile.id)}
-                  />
-                  <h4>{profile.name}</h4>
-                </div>
-                <div class="profile-specs">
-                  <div class="spec-item">
-                    <span class="spec-label">Target FPS:</span>
-                    <span class="spec-value">{profile.targetFPS}</span>
-                  </div>
-                  <div class="spec-item">
-                    <span class="spec-label">Max Inference:</span>
-                    <span class="spec-value">{profile.maxInferenceTime}ms</span>
-                  </div>
-                  <div class="spec-item">
-                    <span class="spec-label">Confidence:</span>
-                    <span class="spec-value">{profile.confidenceThreshold}</span>
-                  </div>
-                  <div class="spec-item">
-                    <span class="spec-label">Max Detections:</span>
-                    <span class="spec-value">{profile.maxDetections}</span>
-                  </div>
-                  <div class="spec-item">
-                    <span class="spec-label">WebGL:</span>
-                    <span class="spec-value">{profile.useWebGL ? '✓' : '✗'}</span>
-                  </div>
-                </div>
+              <div class="metric-value">{formatNumber(metrics.inferenceTime)}ms</div>
+              <div class="metric-chart">
+                <svg width="200" height="40" viewBox="0 0 200 40">
+                  {@html renderChart(inferenceHistory, 200, 40, '#3b82f6')}
+                </svg>
               </div>
-            {/each}
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-icon">🧠</span>
+                <span class="metric-title">Memory Usage</span>
+              </div>
+              <div class="metric-value">{formatPercentage(metrics.memoryUsage)}</div>
+              <div class="metric-chart">
+                <svg width="200" height="40" viewBox="0 0 200 40">
+                  {@html renderChart(memoryHistory, 200, 40, '#f59e0b')}
+                </svg>
+              </div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-icon">💻</span>
+                <span class="metric-title">CPU Usage</span>
+              </div>
+              <div class="metric-value">{formatPercentage(metrics.cpuUsage)}</div>
+              <div class="metric-chart">
+                <svg width="200" height="40" viewBox="0 0 200 40">
+                  {@html renderChart(cpuHistory, 200, 40, '#ef4444')}
+                </svg>
+              </div>
+            </div>
           </div>
         </div>
       {/if}
 
-      <!-- Report Tab -->
-      {#if selectedTab === 'report'}
-        <div class="report-tab">
-          {#if performanceReport}
-            <div class="report-summary">
-              <h3>Performance Report</h3>
-              <div class="overall-score">
-                <span class="score-label">Overall Score:</span>
-                <span class="score-value {getPerformanceColor(performanceReport.overallScore)}">
-                  {formatNumber(performanceReport.overallScore, 0)}/100
-                </span>
-                <span class="trend-indicator">
-                  {getTrendIcon(performanceReport.trend)} {performanceReport.trend}
-                </span>
-              </div>
+      {#if activeTab === 'profiles'}
+        <div class="profiles-tab">
+          <div class="current-profile">
+            <h4>Current Profile: {profile.name}</h4>
+            <div class="profile-details">
+              <div class="detail">Resolution: {profile.maxResolution}p</div>
+              <div class="detail">Max FPS: {profile.maxFPS}</div>
+              <div class="detail">Confidence: {profile.confidenceThreshold}</div>
+              <div class="detail">GPU: {profile.enableGPUAcceleration ? 'Enabled' : 'Disabled'}</div>
+              <div class="detail">Quality: {profile.qualityLevel}</div>
             </div>
+          </div>
 
-            {#if performanceReport.bottlenecks.length > 0}
-              <div class="bottlenecks-section">
-                <h4>🚨 Bottlenecks</h4>
-                <ul class="bottlenecks-list">
-                  {#each performanceReport.bottlenecks as bottleneck}
-                    <li class="bottleneck-item">{bottleneck}</li>
-                  {/each}
-                </ul>
-              </div>
-            {/if}
-
-            {#if performanceReport.recommendations.length > 0}
-              <div class="recommendations-section">
-                <h4>💡 Recommendations</h4>
-                <ul class="recommendations-list">
-                  {#each performanceReport.recommendations as recommendation}
-                    <li class="recommendation-item">{recommendation}</li>
-                  {/each}
-                </ul>
-              </div>
-            {/if}
-
-            <div class="optimization-impact">
-              <h4>🎯 Optimization Impact</h4>
-              <div class="impact-grid">
-                {#each Object.entries(performanceReport.optimizationImpact) as [key, value]}
-                  <div class="impact-item">
-                    <span class="impact-label">{key.replace('-', ' ')}</span>
-                    <span class="impact-value">+{formatNumber(value, 0)}%</span>
+          <div class="profile-options">
+            <h4>Available Profiles</h4>
+            <div class="profile-grid">
+              {#each advancedPerformanceOptimizer.getAllProfiles() as profileOption}
+                <div class="profile-card" class:active={profileOption.name === profile.name}>
+                  <div class="profile-name">{profileOption.name}</div>
+                  <div class="profile-specs">
+                    <div>🎯 {profileOption.maxFPS} FPS</div>
+                    <div>📺 {profileOption.maxResolution}p</div>
+                    <div>🎚️ {profileOption.confidenceThreshold} threshold</div>
+                    <div>⚡ {profileOption.enableGPUAcceleration ? 'GPU' : 'CPU'}</div>
                   </div>
-                {/each}
-              </div>
+                  <button 
+                    class="btn btn-sm" 
+                    disabled={profileOption.name === profile.name}
+                    on:click={() => switchProfile(profileOption.name.toLowerCase().replace(/\s+/g, '-'))}
+                  >
+                    {profileOption.name === profile.name ? 'Active' : 'Switch'}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      {#if activeTab === 'recommendations'}
+        <div class="recommendations-tab">
+          {#if recommendations.length > 0}
+            <h4>Optimization Recommendations</h4>
+            <div class="recommendations-list">
+              {#each recommendations as recommendation}
+                <div class="recommendation-card" class:critical={recommendation.priority === 'critical'}>
+                  <div class="recommendation-header">
+                    <span class="recommendation-icon">
+                      {#if recommendation.type === 'performance'}🚀
+                      {:else if recommendation.type === 'battery'}🔋
+                      {:else if recommendation.type === 'memory'}🧠
+                      {:else if recommendation.type === 'quality'}✨
+                      {:else}💡{/if}
+                    </span>
+                    <span class="recommendation-title">{recommendation.title}</span>
+                    <span class="priority-badge priority-{recommendation.priority}">{recommendation.priority}</span>
+                  </div>
+                  <div class="recommendation-description">{recommendation.description}</div>
+                  <div class="recommendation-footer">
+                    <div class="improvement-estimate">
+                      📈 +{formatPercentage(recommendation.estimatedImprovement)} improvement
+                    </div>
+                    <button class="btn btn-sm" on:click={() => applyRecommendation(recommendation)}>
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              {/each}
             </div>
           {:else}
-            <div class="loading-state">
-              <span class="loading-icon">📊</span>
-              <span>Generating performance report...</span>
+            <div class="no-recommendations">
+              <div class="no-recommendations-icon">✅</div>
+              <h4>All Good!</h4>
+              <p>No optimization recommendations at the moment. Your system is running smoothly.</p>
             </div>
           {/if}
         </div>
       {/if}
 
-      <!-- Dashboard Actions -->
-      <div class="dashboard-actions">
-        <button class="action-button" on:click={exportPerformanceData}>
-          💾 Export Data
-        </button>
-        <button class="action-button" on:click={() => location.reload()}>
-          🔄 Reset
-        </button>
-      </div>
+      {#if activeTab === 'device'}
+        <div class="device-tab">
+          <div class="device-info">
+            <h4>Device Information</h4>
+            <div class="device-grid">
+              <div class="device-card">
+                <div class="device-icon">📱</div>
+                <div class="device-label">Device Tier</div>
+                <div class="device-value">{device.tier}</div>
+              </div>
+              
+              <div class="device-card">
+                <div class="device-icon">{getBatteryIcon(device.batteryLevel)}</div>
+                <div class="device-label">Battery</div>
+                <div class="device-value">{formatPercentage(device.batteryLevel)}</div>
+              </div>
+              
+              <div class="device-card">
+                <div class="device-icon">{getNetworkIcon(device.networkSpeed)}</div>
+                <div class="device-label">Network</div>
+                <div class="device-value">{formatNumber(device.networkSpeed)} Mbps</div>
+              </div>
+              
+              <div class="device-card">
+                <div class="device-icon">💾</div>
+                <div class="device-label">Memory</div>
+                <div class="device-value">{formatPercentage(device.memoryUsage)}</div>
+              </div>
+              
+              <div class="device-card">
+                <div class="device-icon">⚙️</div>
+                <div class="device-label">CPU</div>
+                <div class="device-value">{formatPercentage(device.cpuUsage)}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="system-info">
+            <h4>System Capabilities</h4>
+            <div class="capabilities-list">
+              <div class="capability">
+                <span class="capability-icon">🎮</span>
+                <span class="capability-label">WebGL Support</span>
+                <span class="capability-status supported">✅ Supported</span>
+              </div>
+              <div class="capability">
+                <span class="capability-icon">🎤</span>
+                <span class="capability-label">Speech Recognition</span>
+                <span class="capability-status supported">✅ Supported</span>
+              </div>
+              <div class="capability">
+                <span class="capability-icon">📷</span>
+                <span class="capability-label">Camera Access</span>
+                <span class="capability-status supported">✅ Supported</span>
+              </div>
+              <div class="capability">
+                <span class="capability-icon">🔧</span>
+                <span class="capability-label">Web Workers</span>
+                <span class="capability-status supported">✅ Supported</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
+
+<!-- Export Modal -->
+{#if showExportModal}
+  <div class="modal-overlay" on:click={() => showExportModal = false}>
+    <div class="modal" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>📊 Export Performance Data</h3>
+        <button class="btn btn-sm" on:click={() => showExportModal = false}>✕</button>
+      </div>
+      <div class="modal-content">
+        <p>Export current performance metrics and history as JSON file.</p>
+        <div class="export-info">
+          <div>📊 Current Score: {score}/100</div>
+          <div>📈 Trend: {trend.trend}</div>
+          <div>⚙️ Profile: {profile.name}</div>
+          <div>📱 Device: {device.tier}-tier</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" on:click={() => showExportModal = false}>
+          Cancel
+        </button>
+        <button class="btn btn-primary" on:click={exportData}>
+          📥 Export Data
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .performance-dashboard {
     position: fixed;
     top: 20px;
     right: 20px;
-    z-index: 1000;
-    min-width: 300px;
-    max-width: 800px;
-    background: rgba(255, 255, 255, 0.95);
+    width: 400px;
+    background: white;
     border-radius: 12px;
-    border: 1px solid #e5e7eb;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    transition: all 0.3s ease;
+  }
+
+  .performance-dashboard.minimized {
+    width: 300px;
   }
 
   .dashboard-header {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    align-items: center;
+    padding: 16px 20px;
     border-bottom: 1px solid #e5e7eb;
   }
 
-  .dashboard-toggle {
+  .header-left {
     display: flex;
     align-items: center;
+    gap: 12px;
+  }
+
+  .header-left h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .score-badge, .trend-badge {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+
+  .header-right {
+    display: flex;
     gap: 8px;
+  }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 12px 16px;
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    color: #374151;
-  }
-
-  .dashboard-icon {
-    font-size: 18px;
-  }
-
-  .dashboard-arrow {
-    transition: transform 0.2s ease;
-  }
-
-  .dashboard-arrow.expanded {
-    transform: rotate(180deg);
-  }
-
-  .quick-metrics {
-    display: flex;
-    gap: 16px;
     font-size: 12px;
-  }
-
-  .metric-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .metric-label {
+    font-weight: 500;
     color: #6b7280;
+    transition: all 0.2s;
   }
 
-  .metric-value {
-    font-weight: 600;
-    color: #ef4444;
-  }
-
-  .metric-value.good {
-    color: #10b981;
-  }
-
-  .dashboard-content {
-    padding: 16px;
-  }
-
-  .tab-navigation {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .tab-button {
-    padding: 8px 12px;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
+  .tab.active {
+    color: #1f2937;
     background: white;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.2s ease;
+    border-bottom: 2px solid #3b82f6;
   }
 
-  .tab-button.active {
-    background: #3b82f6;
-    color: white;
-    border-color: #3b82f6;
+  .tab-content {
+    padding: 20px;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+
+  .metrics-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .score-circle {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+
+  .score-text {
+    font-size: 24px;
+    font-weight: 600;
+    fill: #1f2937;
   }
 
   .metrics-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: 1fr 1fr;
     gap: 16px;
-    margin-bottom: 16px;
   }
 
   .metric-card {
-    background: white;
-    border: 1px solid #e5e7eb;
+    background: #f9fafb;
     border-radius: 8px;
     padding: 16px;
+    border: 1px solid #e5e7eb;
   }
 
   .metric-header {
@@ -553,347 +569,356 @@
     margin-bottom: 8px;
   }
 
-  .metric-header h3 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #374151;
-  }
-
   .metric-icon {
     font-size: 16px;
   }
 
-  .metric-value-large {
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .metric-target {
+  .metric-title {
     font-size: 12px;
+    font-weight: 500;
     color: #6b7280;
   }
 
-  .device-info {
+  .metric-value {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1f2937;
+    margin-bottom: 12px;
+  }
+
+  .metric-chart {
+    width: 100%;
+    height: 40px;
+  }
+
+  .profiles-tab {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 20px;
   }
 
-  .device-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-  }
-
-  .charts-section {
-    margin-top: 24px;
-  }
-
-  .charts-section h3 {
-    margin: 0 0 16px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #374151;
-  }
-
-  .charts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 16px;
-  }
-
-  .chart-card {
-    background: white;
-    border: 1px solid #e5e7eb;
+  .current-profile {
+    background: #f0f9ff;
+    border: 1px solid #0ea5e9;
     border-radius: 8px;
     padding: 16px;
   }
 
-  .chart-card h4 {
+  .current-profile h4 {
     margin: 0 0 12px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #374151;
+    color: #0369a1;
   }
 
-  .chart-placeholder {
-    height: 80px;
-    background: #f9fafb;
-    border-radius: 4px;
-    display: flex;
-    align-items: end;
-    padding: 8px;
-  }
-
-  .chart-line {
-    display: flex;
-    align-items: end;
-    gap: 2px;
-    width: 100%;
-  }
-
-  .chart-point {
-    background: #3b82f6;
-    width: 8px;
-    border-radius: 2px;
-    min-height: 2px;
-    transition: all 0.2s ease;
-  }
-
-  .advanced-toggle {
-    display: flex;
-    justify-content: center;
-    margin-top: 16px;
-  }
-
-  .toggle-button {
-    padding: 8px 16px;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    background: white;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.2s ease;
-  }
-
-  .toggle-button:hover {
-    background: #f9fafb;
-  }
-
-  .loading-state {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .profile-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
-    padding: 32px;
-    color: #6b7280;
     font-size: 14px;
   }
 
-  .loading-icon {
-    font-size: 18px;
-  }
-
-  .profile-tab h3 {
-    margin: 0 0 16px 0;
-    font-size: 16px;
-    font-weight: 600;
+  .detail {
     color: #374151;
   }
 
   .profile-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
   }
 
   .profile-card {
-    background: white;
+    background: #f9fafb;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
-    padding: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    padding: 12px;
+    transition: all 0.2s;
   }
 
   .profile-card.active {
+    background: #dbeafe;
     border-color: #3b82f6;
-    background: #eff6ff;
   }
 
-  .profile-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .profile-header h4 {
-    margin: 0;
-    font-size: 14px;
+  .profile-name {
     font-weight: 600;
-    color: #374151;
+    margin-bottom: 8px;
   }
 
   .profile-specs {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 12px;
+  }
+
+  .profile-specs div {
+    margin-bottom: 4px;
+  }
+
+  .recommendations-tab {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 16px;
   }
 
-  .spec-item {
+  .recommendations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .recommendation-card {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .recommendation-card.critical {
+    border-color: #ef4444;
+    background: #fef2f2;
+  }
+
+  .recommendation-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .recommendation-title {
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .priority-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .priority-high {
+    background: #fef2f2;
+    color: #ef4444;
+  }
+
+  .priority-medium {
+    background: #fef3c7;
+    color: #f59e0b;
+  }
+
+  .priority-low {
+    background: #f0f9ff;
+    color: #0ea5e9;
+  }
+
+  .priority-critical {
+    background: #450a0a;
+    color: #fef2f2;
+  }
+
+  .recommendation-description {
+    color: #6b7280;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+
+  .recommendation-footer {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+  }
+
+  .improvement-estimate {
     font-size: 12px;
+    color: #10b981;
+    font-weight: 500;
   }
 
-  .spec-label {
+  .no-recommendations {
+    text-align: center;
     color: #6b7280;
+    padding: 40px 20px;
   }
 
-  .spec-value {
+  .no-recommendations-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+
+  .device-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .device-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .device-card {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+
+  .device-icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+
+  .device-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+
+  .device-value {
     font-weight: 600;
-    color: #374151;
+    color: #1f2937;
   }
 
-  .report-tab {
-    max-height: 400px;
-    overflow-y: auto;
+  .capabilities-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
-  .report-summary {
-    margin-bottom: 24px;
-  }
-
-  .report-summary h3 {
-    margin: 0 0 12px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #374151;
-  }
-
-  .overall-score {
+  .capability {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 14px;
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 8px;
   }
 
-  .score-label {
-    color: #6b7280;
-  }
-
-  .score-value {
+  .capability-icon {
     font-size: 18px;
-    font-weight: 700;
   }
 
-  .trend-indicator {
+  .capability-label {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  .capability-status {
     font-size: 12px;
-    color: #6b7280;
+    font-weight: 500;
   }
 
-  .bottlenecks-section, .recommendations-section {
-    margin-bottom: 24px;
+  .capability-status.supported {
+    color: #10b981;
   }
 
-  .bottlenecks-section h4, .recommendations-section h4 {
-    margin: 0 0 8px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #374151;
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
   }
 
-  .bottlenecks-list, .recommendations-list {
-    list-style: none;
-    padding: 0;
+  .modal {
+    background: white;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .modal-header h3 {
     margin: 0;
   }
 
-  .bottleneck-item, .recommendation-item {
-    padding: 8px 12px;
-    margin-bottom: 4px;
-    border-radius: 4px;
-    font-size: 12px;
+  .modal-content {
+    padding: 20px;
   }
 
-  .bottleneck-item {
-    background: #fef2f2;
-    border-left: 3px solid #ef4444;
-    color: #7f1d1d;
-  }
-
-  .recommendation-item {
-    background: #f0f9ff;
-    border-left: 3px solid #3b82f6;
-    color: #1e3a8a;
-  }
-
-  .optimization-impact h4 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #374151;
-  }
-
-  .impact-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
-  }
-
-  .impact-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: #f0fdf4;
-    border-radius: 4px;
-    font-size: 12px;
-  }
-
-  .impact-label {
-    color: #166534;
-    text-transform: capitalize;
-  }
-
-  .impact-value {
-    font-weight: 600;
-    color: #16a34a;
-  }
-
-  .dashboard-actions {
-    display: flex;
-    gap: 8px;
+  .export-info {
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 16px;
     margin-top: 16px;
-    padding-top: 16px;
+  }
+
+  .export-info div {
+    margin-bottom: 8px;
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 20px;
     border-top: 1px solid #e5e7eb;
   }
 
-  .action-button {
-    padding: 8px 12px;
-    border: 1px solid #e5e7eb;
+  .btn {
+    padding: 8px 16px;
     border-radius: 6px;
-    background: white;
+    border: none;
     cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .btn-sm {
+    padding: 4px 8px;
     font-size: 12px;
-    transition: all 0.2s ease;
   }
 
-  .action-button:hover {
-    background: #f9fafb;
+  .btn-primary {
+    background: #3b82f6;
+    color: white;
   }
 
-  .text-green-600 {
-    color: #16a34a;
+  .btn-primary:hover {
+    background: #2563eb;
   }
 
-  .text-yellow-600 {
-    color: #ca8a04;
+  .btn-secondary {
+    background: #6b7280;
+    color: white;
   }
 
-  .text-red-600 {
-    color: #dc2626;
+  .btn-secondary:hover {
+    background: #4b5563;
   }
 
-  /* Responsive Design */
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   @media (max-width: 768px) {
     .performance-dashboard {
-      position: fixed;
-      top: 10px;
+      width: 350px;
       right: 10px;
-      left: 10px;
-      min-width: unset;
-      max-width: unset;
+      top: 10px;
     }
 
     .metrics-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .charts-grid {
       grid-template-columns: 1fr;
     }
 
@@ -901,13 +926,8 @@
       grid-template-columns: 1fr;
     }
 
-    .impact-grid {
+    .device-grid {
       grid-template-columns: 1fr;
-    }
-
-    .quick-metrics {
-      flex-direction: column;
-      gap: 4px;
     }
   }
 </style> 
