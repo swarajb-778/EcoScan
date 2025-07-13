@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { initializeAnalytics, trackEvent } from '$lib/utils/analytics';
+  import { enhancedAnalytics } from '$lib/utils/analytics';
   import { isLoading, hasDetections } from '$lib/stores/appStore';
   import DiagnosticPanel from '$lib/components/DiagnosticPanel.svelte';
   import '../app.css';
@@ -14,10 +14,13 @@
   onMount(() => {
     if (typeof window !== 'undefined') {
       // Initialize analytics
-      initializeAnalytics();
+      enhancedAnalytics.startTracking();
       
       // Track page views
-      trackEvent('interaction', 'page_view', 'navigation', $page.url.pathname);
+      enhancedAnalytics.trackEvent('page_view', 'user_interaction', {
+        path: $page.url.pathname,
+        url: $page.url.href
+      });
       
       // Set up PWA install prompt
       window.addEventListener('beforeinstallprompt', (e) => {
@@ -28,7 +31,7 @@
 
       // Track app installation
       window.addEventListener('appinstalled', () => {
-        trackEvent('conversion', 'app_installed', 'pwa_install');
+        enhancedAnalytics.trackEvent('app_installed', 'user_interaction', { source: 'pwa_install' });
         isInstallable = false;
       });
     }
