@@ -1,647 +1,1370 @@
 /**
- * Advanced Offline Capabilities Manager
- * Enables full app functionality without internet connection
+ * Advanced Offline Management System for EcoScan
+ * 
+ * Features:
+ * - Intelligent caching with cache policies
+ * - Offline-first architecture with sync capabilities
+ * - Background synchronization and conflict resolution
+ * - Progressive data loading and smart prefetching
+ * - Offline analytics and performance tracking
+ * - Multi-layered cache strategy (memory, indexedDB, service worker)
+ * - Automatic cache invalidation and cleanup
+ * - Offline detection and network status monitoring
+ * - Queue management for offline actions
+ * - Data compression and optimization
+ * - Intelligent sync scheduling
+ * - Offline-specific UI adaptations
+ * - Background tasks and service worker integration
+ * 
+ * Cache Strategies:
+ * - Cache First (for static assets)
+ * - Network First (for dynamic content)
+ * - Stale While Revalidate (for frequently updated content)
+ * - Network Only (for critical operations)
+ * - Cache Only (for offline-only features)
  */
 
-import { writable, derived } from 'svelte/store';
-import { isBrowser } from './browser.js';
-import type { Detection } from '../types/index.js';
+import { browser } from '$app/environment';
+import { writable, derived, type Readable } from 'svelte/store';
+import { enhancedAnalytics } from './analytics';
 
-export interface OfflineDetection {
+// Offline interfaces
+export interface OfflineConfig {
+  enabled: boolean;
+  debug: boolean;
+  maxCacheSize: number; // in MB
+  maxCacheAge: number; // in milliseconds
+  cachePolicies: {
+    staticAssets: CachePolicy;
+    dynamicContent: CachePolicy;
+    apiResponses: CachePolicy;
+    userGeneratedContent: CachePolicy;
+  };
+  syncStrategy: {
+    enabled: boolean;
+    interval: number; // milliseconds
+    maxRetries: number;
+    backoffMultiplier: number;
+    conflictResolution: 'client' | 'server' | 'merge' | 'prompt';
+  };
+  storage: {
+    memory: boolean;
+    indexedDB: boolean;
+    localStorage: boolean;
+    sessionStorage: boolean;
+  };
+  compression: {
+    enabled: boolean;
+    algorithm: 'gzip' | 'br' | 'deflate';
+    threshold: number; // bytes
+  };
+  prefetching: {
+    enabled: boolean;
+    strategy: 'aggressive' | 'conservative' | 'smart';
+    maxConcurrentRequests: number;
+  };
+  queue: {
+    maxSize: number;
+    priority: 'fifo' | 'lifo' | 'priority';
+    persistence: boolean;
+  };
+}
+
+export type CachePolicy = 'cache-first' | 'network-first' | 'stale-while-revalidate' | 'network-only' | 'cache-only';
+
+export interface CacheEntry {
   id: string;
+  key: string;
+  data: any;
   timestamp: number;
-  imageData: string;
-  detections: Detection[];
-  synced: boolean;
-  location?: GeolocationPosition;
-  userFeedback?: string;
+  expiresAt: number;
+  size: number;
+  accessCount: number;
+  lastAccessed: number;
+  etag?: string;
+  metadata: {
+    url?: string;
+    method?: string;
+    headers?: Record<string, string>;
+    compressed?: boolean;
+    priority?: number;
+  };
 }
 
 export interface SyncQueue {
   id: string;
-  type: 'detection' | 'feedback' | 'analytics';
+  action: 'create' | 'update' | 'delete' | 'sync';
+  resource: string;
   data: any;
   timestamp: number;
   retryCount: number;
   maxRetries: number;
+  priority: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error?: string;
+  metadata: any;
 }
 
 export interface OfflineStatus {
   isOnline: boolean;
-  hasOfflineCapability: boolean;
-  storageQuota: number;
-  storageUsed: number;
-  lastSync: number;
-  pendingSync: number;
-  modelsCached: string[];
+  isOffline: boolean;
+  connectionType: 'wifi' | 'cellular' | 'ethernet' | 'bluetooth' | 'unknown';
+  effectiveType: 'slow-2g' | '2g' | '3g' | '4g' | '5g' | 'unknown';
+  downlink: number;
+  rtt: number;
+  saveData: boolean;
+  networkQuality: 'excellent' | 'good' | 'poor' | 'offline';
+  lastOnline: number;
+  lastOffline: number;
+  syncStatus: 'synced' | 'syncing' | 'pending' | 'failed';
+  queueLength: number;
+  cacheSize: number;
+  cacheHitRate: number;
 }
 
-// Stores for offline functionality
-export const offlineStatus = writable<OfflineStatus>({
-  isOnline: navigator?.onLine || false,
-  hasOfflineCapability: false,
-  storageQuota: 0,
-  storageUsed: 0,
-  lastSync: 0,
-  pendingSync: 0,
-  modelsCached: []
-});
+export interface OfflineMetrics {
+  totalRequests: number;
+  cacheHits: number;
+  cacheMisses: number;
+  networkRequests: number;
+  syncOperations: number;
+  syncFailures: number;
+  bytesTransferred: number;
+  bytesSaved: number;
+  avgResponseTime: number;
+  offlineTime: number;
+  performanceScore: number;
+  lastSync: number;
+  syncQueue: SyncQueue[];
+  cacheEntries: CacheEntry[];
+}
 
-export const offlineDetections = writable<OfflineDetection[]>([]);
-export const syncQueue = writable<SyncQueue[]>([]);
+export interface ConflictResolution {
+  id: string;
+  resource: string;
+  clientData: any;
+  serverData: any;
+  strategy: 'client' | 'server' | 'merge' | 'prompt';
+  resolved: boolean;
+  timestamp: number;
+  resolution?: any;
+}
 
-// Derived stores
-export const isOfflineMode = derived(offlineStatus, ($status) => !$status.isOnline);
-export const hasPendingSync = derived(syncQueue, ($queue) => $queue.length > 0);
-
-/**
- * Offline Manager Class
- */
-export class OfflineManager {
-  private dbName = 'ecoscan-offline';
-  private dbVersion = 1;
-  private db: IDBDatabase | null = null;
-  private modelCache: Map<string, any> = new Map();
+class OfflineManager {
+  private config: OfflineConfig;
+  private memoryCache: Map<string, CacheEntry> = new Map();
+  private indexedDBCache: IDBDatabase | null = null;
+  private syncQueue: SyncQueue[] = [];
+  private activeRequests: Map<string, Promise<any>> = new Map();
+  private networkStatus: OfflineStatus;
+  private metrics: OfflineMetrics;
   private syncInterval: number | null = null;
-  private serviceWorker: ServiceWorkerRegistration | null = null;
+  private cleanupInterval: number | null = null;
+  private prefetchQueue: string[] = [];
+  private conflictQueue: ConflictResolution[] = [];
+  private compressionWorker: Worker | null = null;
+  private serviceWorker: ServiceWorker | null = null;
+
+  // Reactive stores
+  private _offlineStatus = writable<OfflineStatus>(this.getInitialStatus());
+  private _metrics = writable<OfflineMetrics>(this.getInitialMetrics());
+  private _syncQueue = writable<SyncQueue[]>([]);
+  private _conflicts = writable<ConflictResolution[]>([]);
+  private _cacheSize = writable<number>(0);
+
+  public readonly offlineStatus: Readable<OfflineStatus> = this._offlineStatus;
+  public readonly metrics: Readable<OfflineMetrics> = this._metrics;
+  public readonly syncQueueStore: Readable<SyncQueue[]> = this._syncQueue;
+  public readonly conflicts: Readable<ConflictResolution[]> = this._conflicts;
+  public readonly cacheSize: Readable<number> = this._cacheSize;
 
   constructor() {
-    if (isBrowser()) {
-      this.initialize();
-    }
+    this.config = this.getOfflineConfig();
+    this.networkStatus = this.getInitialStatus();
+    this.metrics = this.getInitialMetrics();
+    this.initializeOfflineSystem();
   }
 
-  /**
-   * Initialize offline capabilities
-   */
-  async initialize(): Promise<void> {
+  private getOfflineConfig(): OfflineConfig {
+    return {
+      enabled: true,
+      debug: false,
+      maxCacheSize: 100, // 100MB
+      maxCacheAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      cachePolicies: {
+        staticAssets: 'cache-first',
+        dynamicContent: 'network-first',
+        apiResponses: 'stale-while-revalidate',
+        userGeneratedContent: 'network-first'
+      },
+      syncStrategy: {
+        enabled: true,
+        interval: 30000, // 30 seconds
+        maxRetries: 3,
+        backoffMultiplier: 2,
+        conflictResolution: 'merge'
+      },
+      storage: {
+        memory: true,
+        indexedDB: true,
+        localStorage: true,
+        sessionStorage: false
+      },
+      compression: {
+        enabled: true,
+        algorithm: 'gzip',
+        threshold: 1024 // 1KB
+      },
+      prefetching: {
+        enabled: true,
+        strategy: 'smart',
+        maxConcurrentRequests: 3
+      },
+      queue: {
+        maxSize: 1000,
+        priority: 'priority',
+        persistence: true
+      }
+    };
+  }
+
+  private getInitialStatus(): OfflineStatus {
+    return {
+      isOnline: navigator.onLine,
+      isOffline: !navigator.onLine,
+      connectionType: 'unknown',
+      effectiveType: 'unknown',
+      downlink: 0,
+      rtt: 0,
+      saveData: false,
+      networkQuality: navigator.onLine ? 'good' : 'offline',
+      lastOnline: navigator.onLine ? Date.now() : 0,
+      lastOffline: navigator.onLine ? 0 : Date.now(),
+      syncStatus: 'synced',
+      queueLength: 0,
+      cacheSize: 0,
+      cacheHitRate: 0
+    };
+  }
+
+  private getInitialMetrics(): OfflineMetrics {
+    return {
+      totalRequests: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      networkRequests: 0,
+      syncOperations: 0,
+      syncFailures: 0,
+      bytesTransferred: 0,
+      bytesSaved: 0,
+      avgResponseTime: 0,
+      offlineTime: 0,
+      performanceScore: 100,
+      lastSync: 0,
+      syncQueue: [],
+      cacheEntries: []
+    };
+  }
+
+  private async initializeOfflineSystem(): Promise<void> {
+    if (!browser || !this.config.enabled) return;
+
     try {
-      console.log('🔄 Initializing offline capabilities...');
-      
-      // Initialize IndexedDB
-      await this.initializeDatabase();
-      
-      // Register service worker
-      await this.registerServiceWorker();
-      
-      // Set up network status monitoring
+      await this.initializeStorage();
       this.setupNetworkMonitoring();
+      this.setupServiceWorker();
+      this.setupSyncScheduler();
+      this.setupCacheCleanup();
+      this.setupCompressionWorker();
+      this.setupPrefetching();
+      this.loadPersistedData();
       
-      // Initialize storage quota monitoring
-      await this.updateStorageQuota();
-      
-      // Load cached models
-      await this.loadCachedModels();
-      
-      // Start sync process
-      this.startSyncProcess();
-      
-      console.log('✅ Offline capabilities initialized');
-      
-      offlineStatus.update(status => ({
-        ...status,
-        hasOfflineCapability: true
-      }));
-      
+      console.log('🔄 Offline management system initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize offline capabilities:', error);
+      console.error('Failed to initialize offline system:', error);
     }
   }
 
-  /**
-   * Initialize IndexedDB for offline storage
-   */
-  private async initializeDatabase(): Promise<void> {
+  private async initializeStorage(): Promise<void> {
+    if (this.config.storage.indexedDB) {
+      await this.initializeIndexedDB();
+    }
+    if (this.config.storage.localStorage) {
+      this.loadFromLocalStorage();
+    }
+  }
+
+  private async initializeIndexedDB(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.dbVersion);
+      const request = indexedDB.open('EcoScanOfflineCache', 1);
       
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        this.db = request.result;
+        this.indexedDBCache = request.result;
         resolve();
       };
       
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
         
-        // Create object stores
-        if (!db.objectStoreNames.contains('detections')) {
-          const detectionsStore = db.createObjectStore('detections', { keyPath: 'id' });
-          detectionsStore.createIndex('timestamp', 'timestamp', { unique: false });
-          detectionsStore.createIndex('synced', 'synced', { unique: false });
+        // Create stores
+        if (!db.objectStoreNames.contains('cache')) {
+          const cacheStore = db.createObjectStore('cache', { keyPath: 'id' });
+          cacheStore.createIndex('key', 'key', { unique: true });
+          cacheStore.createIndex('timestamp', 'timestamp');
+          cacheStore.createIndex('expiresAt', 'expiresAt');
         }
         
         if (!db.objectStoreNames.contains('syncQueue')) {
           const syncStore = db.createObjectStore('syncQueue', { keyPath: 'id' });
-          syncStore.createIndex('type', 'type', { unique: false });
-          syncStore.createIndex('timestamp', 'timestamp', { unique: false });
+          syncStore.createIndex('timestamp', 'timestamp');
+          syncStore.createIndex('priority', 'priority');
+          syncStore.createIndex('status', 'status');
         }
         
-        if (!db.objectStoreNames.contains('models')) {
-          const modelsStore = db.createObjectStore('models', { keyPath: 'name' });
-          modelsStore.createIndex('version', 'version', { unique: false });
-        }
-        
-        if (!db.objectStoreNames.contains('cache')) {
-          db.createObjectStore('cache', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('conflicts')) {
+          const conflictStore = db.createObjectStore('conflicts', { keyPath: 'id' });
+          conflictStore.createIndex('timestamp', 'timestamp');
+          conflictStore.createIndex('resolved', 'resolved');
         }
       };
     });
   }
 
-  /**
-   * Register service worker for advanced caching
-   */
-  private async registerServiceWorker(): Promise<void> {
-    if (!('serviceWorker' in navigator)) {
-      console.warn('Service Worker not supported');
-      return;
+  private loadFromLocalStorage(): void {
+    try {
+      const syncQueue = localStorage.getItem('ecoscan-sync-queue');
+      if (syncQueue) {
+        this.syncQueue = JSON.parse(syncQueue);
+      }
+      
+      const conflicts = localStorage.getItem('ecoscan-conflicts');
+      if (conflicts) {
+        this.conflictQueue = JSON.parse(conflicts);
+      }
+      
+      const metrics = localStorage.getItem('ecoscan-offline-metrics');
+      if (metrics) {
+        this.metrics = { ...this.metrics, ...JSON.parse(metrics) };
+      }
+    } catch (error) {
+      console.error('Failed to load from localStorage:', error);
     }
+  }
+
+  private setupNetworkMonitoring(): void {
+    // Basic online/offline detection
+    window.addEventListener('online', () => {
+      this.networkStatus.isOnline = true;
+      this.networkStatus.isOffline = false;
+      this.networkStatus.lastOnline = Date.now();
+      this.networkStatus.networkQuality = 'good';
+      this.updateNetworkStatus();
+      this.processSyncQueue();
+    });
+
+    window.addEventListener('offline', () => {
+      this.networkStatus.isOnline = false;
+      this.networkStatus.isOffline = true;
+      this.networkStatus.lastOffline = Date.now();
+      this.networkStatus.networkQuality = 'offline';
+      this.updateNetworkStatus();
+    });
+
+    // Network Information API (if available)
+    if ('connection' in navigator) {
+      const connection = (navigator as any).connection;
+      
+      const updateConnectionInfo = () => {
+        this.networkStatus.connectionType = connection.type || 'unknown';
+        this.networkStatus.effectiveType = connection.effectiveType || 'unknown';
+        this.networkStatus.downlink = connection.downlink || 0;
+        this.networkStatus.rtt = connection.rtt || 0;
+        this.networkStatus.saveData = connection.saveData || false;
+        
+        // Determine network quality
+        if (connection.effectiveType === '4g' || connection.effectiveType === '5g') {
+          this.networkStatus.networkQuality = 'excellent';
+        } else if (connection.effectiveType === '3g') {
+          this.networkStatus.networkQuality = 'good';
+        } else if (connection.effectiveType === '2g' || connection.effectiveType === 'slow-2g') {
+          this.networkStatus.networkQuality = 'poor';
+        }
+        
+        this.updateNetworkStatus();
+      };
+      
+      connection.addEventListener('change', updateConnectionInfo);
+      updateConnectionInfo();
+    }
+
+    // Periodic connectivity check
+    setInterval(() => {
+      this.checkConnectivity();
+    }, 10000); // Check every 10 seconds
+  }
+
+  private async checkConnectivity(): Promise<void> {
+    if (!this.networkStatus.isOnline) return;
 
     try {
-      this.serviceWorker = await navigator.serviceWorker.register('/sw.js');
-      console.log('✅ Service Worker registered');
+      const start = Date.now();
+      const response = await fetch('/api/ping', {
+        method: 'HEAD',
+        cache: 'no-cache'
+      });
+      const end = Date.now();
       
-      // Listen for service worker messages
-      navigator.serviceWorker.addEventListener('message', this.handleServiceWorkerMessage.bind(this));
-      
+      if (response.ok) {
+        this.networkStatus.rtt = end - start;
+        this.networkStatus.networkQuality = this.networkStatus.rtt < 100 ? 'excellent' : 
+                                            this.networkStatus.rtt < 300 ? 'good' : 'poor';
+      }
     } catch (error) {
-      console.warn('Service Worker registration failed:', error);
+      this.networkStatus.isOnline = false;
+      this.networkStatus.isOffline = true;
+      this.networkStatus.networkQuality = 'offline';
+    }
+    
+    this.updateNetworkStatus();
+  }
+
+  private setupServiceWorker(): void {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(registration => {
+        this.serviceWorker = registration.active;
+        this.setupServiceWorkerMessaging();
+      });
     }
   }
 
-  /**
-   * Setup network status monitoring
-   */
-  private setupNetworkMonitoring(): void {
-    const updateOnlineStatus = () => {
-      const isOnline = navigator.onLine;
+  private setupServiceWorkerMessaging(): void {
+    if (!this.serviceWorker) return;
+
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const { type, data } = event.data;
       
-      offlineStatus.update(status => ({
-        ...status,
-        isOnline
-      }));
-      
-      if (isOnline) {
-        console.log('🌐 Connection restored - starting sync');
-        this.syncOfflineData();
-      } else {
-        console.log('📴 Connection lost - entering offline mode');
+      switch (type) {
+        case 'CACHE_HIT':
+          this.metrics.cacheHits++;
+          this.metrics.bytesSaved += data.size;
+          break;
+        case 'CACHE_MISS':
+          this.metrics.cacheMisses++;
+          break;
+        case 'NETWORK_REQUEST':
+          this.metrics.networkRequests++;
+          this.metrics.bytesTransferred += data.size;
+          break;
+        case 'SYNC_COMPLETED':
+          this.handleSyncCompleted(data);
+          break;
+        case 'SYNC_FAILED':
+          this.handleSyncFailed(data);
+          break;
       }
-    };
-    
-    window.addEventListener('online', updateOnlineStatus);
-    window.addEventListener('offline', updateOnlineStatus);
-    
-    // Initial status
-    updateOnlineStatus();
-  }
-
-  /**
-   * Store detection offline
-   */
-  async storeDetectionOffline(
-    imageData: string, 
-    detections: Detection[], 
-    location?: GeolocationPosition
-  ): Promise<string> {
-    if (!this.db) throw new Error('Database not initialized');
-    
-    const offlineDetection: OfflineDetection = {
-      id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: Date.now(),
-      imageData,
-      detections,
-      synced: false,
-      location
-    };
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['detections'], 'readwrite');
-      const store = transaction.objectStore('detections');
       
-      const request = store.add(offlineDetection);
-      
-      request.onsuccess = () => {
-        console.log('💾 Detection stored offline:', offlineDetection.id);
-        
-        // Update reactive store
-        offlineDetections.update(detections => [...detections, offlineDetection]);
-        
-        resolve(offlineDetection.id);
-      };
-      
-      request.onerror = () => reject(request.error);
+      this.updateMetrics();
     });
   }
 
-  /**
-   * Get offline detections
-   */
-  async getOfflineDetections(): Promise<OfflineDetection[]> {
-    if (!this.db) return [];
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['detections'], 'readonly');
-      const store = transaction.objectStore('detections');
-      const request = store.getAll();
-      
-      request.onsuccess = () => {
-        const detections = request.result as OfflineDetection[];
-        offlineDetections.set(detections);
-        resolve(detections);
-      };
-      
-      request.onerror = () => reject(request.error);
-    });
+  private setupSyncScheduler(): void {
+    if (!this.config.syncStrategy.enabled) return;
+
+    this.syncInterval = setInterval(() => {
+      if (this.networkStatus.isOnline && this.syncQueue.length > 0) {
+        this.processSyncQueue();
+      }
+    }, this.config.syncStrategy.interval);
   }
 
-  /**
-   * Add item to sync queue
-   */
-  async addToSyncQueue(type: SyncQueue['type'], data: any): Promise<void> {
-    if (!this.db) return;
+  private setupCacheCleanup(): void {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupExpiredCache();
+      this.optimizeCacheSize();
+    }, 60000); // Cleanup every minute
+  }
+
+  private setupCompressionWorker(): void {
+    if (!this.config.compression.enabled) return;
+
+    try {
+      this.compressionWorker = new Worker('/workers/compression.js');
+      this.compressionWorker.onmessage = (event) => {
+        const { id, compressed, size } = event.data;
+        this.handleCompressionResult(id, compressed, size);
+      };
+    } catch (error) {
+      console.warn('Compression worker not available:', error);
+    }
+  }
+
+  private setupPrefetching(): void {
+    if (!this.config.prefetching.enabled) return;
+
+    // Intersection Observer for smart prefetching
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const element = entry.target as HTMLElement;
+          const url = element.dataset.prefetch;
+          if (url) {
+            this.prefetchQueue.push(url);
+          }
+        }
+      });
+    }, { threshold: 0.1 });
+
+    // Monitor for prefetch candidates
+    document.addEventListener('DOMContentLoaded', () => {
+      const prefetchElements = document.querySelectorAll('[data-prefetch]');
+      prefetchElements.forEach(element => observer.observe(element));
+    });
+
+    // Process prefetch queue
+    setInterval(() => {
+      this.processPrefetchQueue();
+    }, 5000); // Process every 5 seconds
+  }
+
+  private loadPersistedData(): void {
+    if (this.config.storage.localStorage) {
+      this.loadFromLocalStorage();
+    }
     
-    const queueItem: SyncQueue = {
-      id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      type,
+    if (this.indexedDBCache) {
+      this.loadFromIndexedDB();
+    }
+  }
+
+  private async loadFromIndexedDB(): Promise<void> {
+    if (!this.indexedDBCache) return;
+
+    try {
+      // Load cache entries
+      const cacheTransaction = this.indexedDBCache.transaction(['cache'], 'readonly');
+      const cacheStore = cacheTransaction.objectStore('cache');
+      const cacheRequest = cacheStore.getAll();
+      
+      cacheRequest.onsuccess = () => {
+        const entries = cacheRequest.result as CacheEntry[];
+        entries.forEach(entry => {
+          if (entry.expiresAt > Date.now()) {
+            this.memoryCache.set(entry.key, entry);
+          }
+        });
+        this.updateCacheSize();
+      };
+
+      // Load sync queue
+      const syncTransaction = this.indexedDBCache.transaction(['syncQueue'], 'readonly');
+      const syncStore = syncTransaction.objectStore('syncQueue');
+      const syncRequest = syncStore.getAll();
+      
+      syncRequest.onsuccess = () => {
+        this.syncQueue = syncRequest.result as SyncQueue[];
+        this.updateSyncQueue();
+      };
+
+      // Load conflicts
+      const conflictTransaction = this.indexedDBCache.transaction(['conflicts'], 'readonly');
+      const conflictStore = conflictTransaction.objectStore('conflicts');
+      const conflictRequest = conflictStore.getAll();
+      
+      conflictRequest.onsuccess = () => {
+        this.conflictQueue = conflictRequest.result as ConflictResolution[];
+        this.updateConflicts();
+      };
+    } catch (error) {
+      console.error('Failed to load from IndexedDB:', error);
+    }
+  }
+
+  public async get(key: string, policy: CachePolicy = 'cache-first'): Promise<any> {
+    this.metrics.totalRequests++;
+    const startTime = Date.now();
+
+    try {
+      const result = await this.executeGetStrategy(key, policy);
+      const endTime = Date.now();
+      this.updateAverageResponseTime(endTime - startTime);
+      return result;
+    } catch (error) {
+      console.error('Cache get error:', error);
+      throw error;
+    }
+  }
+
+  private async executeGetStrategy(key: string, policy: CachePolicy): Promise<any> {
+    switch (policy) {
+      case 'cache-first':
+        return this.getCacheFirst(key);
+      case 'network-first':
+        return this.getNetworkFirst(key);
+      case 'stale-while-revalidate':
+        return this.getStaleWhileRevalidate(key);
+      case 'network-only':
+        return this.getNetworkOnly(key);
+      case 'cache-only':
+        return this.getCacheOnly(key);
+      default:
+        return this.getCacheFirst(key);
+    }
+  }
+
+  private async getCacheFirst(key: string): Promise<any> {
+    const cached = this.getFromCache(key);
+    if (cached) {
+      this.metrics.cacheHits++;
+      return cached.data;
+    }
+
+    if (this.networkStatus.isOnline) {
+      try {
+        const data = await this.fetchFromNetwork(key);
+        this.setCache(key, data);
+        return data;
+      } catch (error) {
+        this.metrics.cacheMisses++;
+        throw error;
+      }
+    } else {
+      this.metrics.cacheMisses++;
+      throw new Error('No cached data available offline');
+    }
+  }
+
+  private async getNetworkFirst(key: string): Promise<any> {
+    if (this.networkStatus.isOnline) {
+      try {
+        const data = await this.fetchFromNetwork(key);
+        this.setCache(key, data);
+        return data;
+      } catch (error) {
+        const cached = this.getFromCache(key);
+        if (cached) {
+          this.metrics.cacheHits++;
+          return cached.data;
+        }
+        throw error;
+      }
+    } else {
+      const cached = this.getFromCache(key);
+      if (cached) {
+        this.metrics.cacheHits++;
+        return cached.data;
+      }
+      throw new Error('No cached data available offline');
+    }
+  }
+
+  private async getStaleWhileRevalidate(key: string): Promise<any> {
+    const cached = this.getFromCache(key);
+    
+    if (cached) {
+      this.metrics.cacheHits++;
+      
+      // Return cached data immediately
+      const result = cached.data;
+      
+      // Revalidate in background if online
+      if (this.networkStatus.isOnline) {
+        this.fetchFromNetwork(key).then(data => {
+          this.setCache(key, data);
+        }).catch(error => {
+          console.warn('Background revalidation failed:', error);
+        });
+      }
+      
+      return result;
+    }
+
+    if (this.networkStatus.isOnline) {
+      const data = await this.fetchFromNetwork(key);
+      this.setCache(key, data);
+      return data;
+    } else {
+      this.metrics.cacheMisses++;
+      throw new Error('No cached data available offline');
+    }
+  }
+
+  private async getNetworkOnly(key: string): Promise<any> {
+    if (!this.networkStatus.isOnline) {
+      throw new Error('Network required but offline');
+    }
+    
+    return this.fetchFromNetwork(key);
+  }
+
+  private async getCacheOnly(key: string): Promise<any> {
+    const cached = this.getFromCache(key);
+    if (cached) {
+      this.metrics.cacheHits++;
+      return cached.data;
+    }
+    
+    this.metrics.cacheMisses++;
+    throw new Error('No cached data available');
+  }
+
+  private getFromCache(key: string): CacheEntry | null {
+    // Check memory cache first
+    const memoryEntry = this.memoryCache.get(key);
+    if (memoryEntry && memoryEntry.expiresAt > Date.now()) {
+      memoryEntry.accessCount++;
+      memoryEntry.lastAccessed = Date.now();
+      return memoryEntry;
+    }
+
+    // Check localStorage
+    if (this.config.storage.localStorage) {
+      try {
+        const stored = localStorage.getItem(`ecoscan-cache-${key}`);
+        if (stored) {
+          const entry = JSON.parse(stored) as CacheEntry;
+          if (entry.expiresAt > Date.now()) {
+            entry.accessCount++;
+            entry.lastAccessed = Date.now();
+            this.memoryCache.set(key, entry);
+            return entry;
+          }
+        }
+      } catch (error) {
+        console.warn('localStorage cache read error:', error);
+      }
+    }
+
+    return null;
+  }
+
+  private async fetchFromNetwork(key: string): Promise<any> {
+    // Check if request is already in progress
+    if (this.activeRequests.has(key)) {
+      return this.activeRequests.get(key);
+    }
+
+    const requestPromise = this.performNetworkRequest(key);
+    this.activeRequests.set(key, requestPromise);
+
+    try {
+      const result = await requestPromise;
+      this.activeRequests.delete(key);
+      return result;
+    } catch (error) {
+      this.activeRequests.delete(key);
+      throw error;
+    }
+  }
+
+  private async performNetworkRequest(key: string): Promise<any> {
+    const startTime = Date.now();
+    
+    try {
+      const response = await fetch(key, {
+        cache: 'no-cache',
+        headers: this.getRequestHeaders()
+      });
+
+      if (!response.ok) {
+        throw new Error(`Network request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const endTime = Date.now();
+      
+      this.metrics.networkRequests++;
+      this.metrics.bytesTransferred += JSON.stringify(data).length;
+      
+      return data;
+    } catch (error) {
+      console.error('Network request failed:', error);
+      throw error;
+    }
+  }
+
+  private getRequestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+
+    if (this.networkStatus.saveData) {
+      headers['Save-Data'] = 'on';
+    }
+
+    return headers;
+  }
+
+  public async set(key: string, data: any, options: { ttl?: number; priority?: number } = {}): Promise<void> {
+    this.setCache(key, data, options);
+  }
+
+  private setCache(key: string, data: any, options: { ttl?: number; priority?: number } = {}): void {
+    const ttl = options.ttl || this.config.maxCacheAge;
+    const priority = options.priority || 1;
+    const size = JSON.stringify(data).length;
+    
+    const entry: CacheEntry = {
+      id: `cache_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      key,
       data,
       timestamp: Date.now(),
-      retryCount: 0,
-      maxRetries: 3
+      expiresAt: Date.now() + ttl,
+      size,
+      accessCount: 1,
+      lastAccessed: Date.now(),
+      metadata: {
+        priority,
+        compressed: false
+      }
     };
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['syncQueue'], 'readwrite');
-      const store = transaction.objectStore('syncQueue');
-      
-      const request = store.add(queueItem);
-      
-      request.onsuccess = () => {
-        syncQueue.update(queue => [...queue, queueItem]);
-        resolve();
-      };
-      
-      request.onerror = () => reject(request.error);
-    });
+
+    // Compress if enabled and data is large enough
+    if (this.config.compression.enabled && size > this.config.compression.threshold) {
+      this.compressData(entry);
+    }
+
+    // Store in memory cache
+    this.memoryCache.set(key, entry);
+
+    // Store in localStorage if enabled
+    if (this.config.storage.localStorage) {
+      try {
+        localStorage.setItem(`ecoscan-cache-${key}`, JSON.stringify(entry));
+      } catch (error) {
+        console.warn('localStorage cache write error:', error);
+      }
+    }
+
+    // Store in IndexedDB if enabled
+    if (this.config.storage.indexedDB && this.indexedDBCache) {
+      this.storeInIndexedDB(entry);
+    }
+
+    this.updateCacheSize();
   }
 
-  /**
-   * Sync offline data when connection is restored
-   */
-  async syncOfflineData(): Promise<void> {
-    if (!navigator.onLine || !this.db) return;
-    
-    console.log('🔄 Starting offline data sync...');
-    
+  private compressData(entry: CacheEntry): void {
+    if (this.compressionWorker) {
+      this.compressionWorker.postMessage({
+        id: entry.id,
+        data: entry.data,
+        algorithm: this.config.compression.algorithm
+      });
+    }
+  }
+
+  private handleCompressionResult(id: string, compressed: any, size: number): void {
+    const entry = Array.from(this.memoryCache.values()).find(e => e.id === id);
+    if (entry) {
+      entry.data = compressed;
+      entry.size = size;
+      entry.metadata.compressed = true;
+      this.metrics.bytesSaved += entry.size - size;
+    }
+  }
+
+  private async storeInIndexedDB(entry: CacheEntry): Promise<void> {
+    if (!this.indexedDBCache) return;
+
     try {
-      // Sync detections
-      await this.syncDetections();
-      
-      // Sync queue items
-      await this.syncQueueItems();
-      
-      // Update last sync timestamp
-      offlineStatus.update(status => ({
-        ...status,
-        lastSync: Date.now(),
-        pendingSync: 0
-      }));
-      
-      console.log('✅ Offline sync completed');
-      
+      const transaction = this.indexedDBCache.transaction(['cache'], 'readwrite');
+      const store = transaction.objectStore('cache');
+      await store.put(entry);
     } catch (error) {
-      console.error('❌ Sync failed:', error);
+      console.error('IndexedDB cache write error:', error);
     }
   }
 
-  /**
-   * Sync offline detections
-   */
-  private async syncDetections(): Promise<void> {
-    const detections = await this.getOfflineDetections();
-    const unsyncedDetections = detections.filter(d => !d.synced);
+  public async remove(key: string): Promise<void> {
+    this.memoryCache.delete(key);
     
-    console.log(`📤 Syncing ${unsyncedDetections.length} offline detections...`);
+    if (this.config.storage.localStorage) {
+      localStorage.removeItem(`ecoscan-cache-${key}`);
+    }
     
-    for (const detection of unsyncedDetections) {
+    if (this.config.storage.indexedDB && this.indexedDBCache) {
       try {
-        // In a real implementation, this would send to the API
-        await this.sendDetectionToAPI(detection);
-        
-        // Mark as synced
-        await this.markDetectionSynced(detection.id);
-        
+        const transaction = this.indexedDBCache.transaction(['cache'], 'readwrite');
+        const store = transaction.objectStore('cache');
+        const index = store.index('key');
+        await index.delete(key);
       } catch (error) {
-        console.warn(`Failed to sync detection ${detection.id}:`, error);
+        console.error('IndexedDB cache delete error:', error);
       }
     }
+    
+    this.updateCacheSize();
   }
 
-  /**
-   * Sync queue items
-   */
-  private async syncQueueItems(): Promise<void> {
-    const queue = await this.getSyncQueue();
+  public async clear(): Promise<void> {
+    this.memoryCache.clear();
     
-    console.log(`📤 Syncing ${queue.length} queue items...`);
+    if (this.config.storage.localStorage) {
+      const keys = Object.keys(localStorage).filter(key => key.startsWith('ecoscan-cache-'));
+      keys.forEach(key => localStorage.removeItem(key));
+    }
     
-    for (const item of queue) {
+    if (this.config.storage.indexedDB && this.indexedDBCache) {
       try {
-        await this.processQueueItem(item);
-        await this.removeFromSyncQueue(item.id);
-        
+        const transaction = this.indexedDBCache.transaction(['cache'], 'readwrite');
+        const store = transaction.objectStore('cache');
+        await store.clear();
       } catch (error) {
-        console.warn(`Failed to sync queue item ${item.id}:`, error);
-        
-        // Increment retry count
-        if (item.retryCount < item.maxRetries) {
-          await this.incrementRetryCount(item.id);
-        } else {
-          await this.removeFromSyncQueue(item.id);
-          console.error(`Queue item ${item.id} exceeded max retries`);
-        }
+        console.error('IndexedDB cache clear error:', error);
       }
     }
+    
+    this.updateCacheSize();
   }
 
-  /**
-   * Cache ML models for offline use
-   */
-  async cacheModel(modelName: string, modelData: ArrayBuffer): Promise<void> {
-    if (!this.db) return;
-    
-    const modelCache = {
-      name: modelName,
-      data: modelData,
-      version: '1.0.0',
+  public addToSyncQueue(item: Omit<SyncQueue, 'id' | 'timestamp' | 'retryCount' | 'status'>): void {
+    if (this.syncQueue.length >= this.config.queue.maxSize) {
+      console.warn('Sync queue is full, removing oldest item');
+      this.syncQueue.shift();
+    }
+
+    const queueItem: SyncQueue = {
+      id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
-      size: modelData.byteLength
+      retryCount: 0,
+      status: 'pending',
+      ...item
     };
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['models'], 'readwrite');
-      const store = transaction.objectStore('models');
-      
-      const request = store.put(modelCache);
-      
-      request.onsuccess = () => {
-        console.log(`📥 Model cached: ${modelName} (${(modelData.byteLength / 1024 / 1024).toFixed(1)}MB)`);
-        
-        this.modelCache.set(modelName, modelData);
-        
-        offlineStatus.update(status => ({
-          ...status,
-          modelsCached: [...status.modelsCached, modelName]
-        }));
-        
-        resolve();
-      };
-      
-      request.onerror = () => reject(request.error);
-    });
+
+    this.syncQueue.push(queueItem);
+    this.persistSyncQueue();
+    this.updateSyncQueue();
+
+    if (this.networkStatus.isOnline) {
+      this.processSyncQueue();
+    }
   }
 
-  /**
-   * Load cached models
-   */
-  private async loadCachedModels(): Promise<void> {
-    if (!this.db) return;
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['models'], 'readonly');
-      const store = transaction.objectStore('models');
-      const request = store.getAll();
-      
-      request.onsuccess = () => {
-        const models = request.result;
-        const modelNames: string[] = [];
-        
-        for (const model of models) {
-          this.modelCache.set(model.name, model.data);
-          modelNames.push(model.name);
+  private async processSyncQueue(): Promise<void> {
+    if (this.syncQueue.length === 0 || !this.networkStatus.isOnline) return;
+
+    this.networkStatus.syncStatus = 'syncing';
+    this.updateNetworkStatus();
+
+    const pendingItems = this.syncQueue
+      .filter(item => item.status === 'pending')
+      .sort((a, b) => this.config.queue.priority === 'priority' ? b.priority - a.priority : 0);
+
+    for (const item of pendingItems) {
+      try {
+        item.status = 'processing';
+        await this.processSyncItem(item);
+        item.status = 'completed';
+        this.metrics.syncOperations++;
+      } catch (error) {
+        item.status = 'failed';
+        item.error = error instanceof Error ? error.message : 'Unknown error';
+        item.retryCount++;
+        this.metrics.syncFailures++;
+
+        if (item.retryCount < item.maxRetries) {
+          item.status = 'pending';
+          // Exponential backoff
+          setTimeout(() => {
+            this.processSyncQueue();
+          }, item.retryCount * this.config.syncStrategy.backoffMultiplier * 1000);
         }
-        
-        offlineStatus.update(status => ({
-          ...status,
-          modelsCached: modelNames
-        }));
-        
-        console.log(`📦 Loaded ${models.length} cached models`);
-        resolve();
-      };
-      
-      request.onerror = () => reject(request.error);
+      }
+    }
+
+    // Clean up completed items
+    this.syncQueue = this.syncQueue.filter(item => item.status !== 'completed');
+    this.persistSyncQueue();
+    this.updateSyncQueue();
+
+    this.networkStatus.syncStatus = this.syncQueue.some(item => item.status === 'failed') ? 'failed' : 'synced';
+    this.updateNetworkStatus();
+  }
+
+  private async processSyncItem(item: SyncQueue): Promise<void> {
+    const { action, resource, data } = item;
+    
+    switch (action) {
+      case 'create':
+        await this.performCreate(resource, data);
+        break;
+      case 'update':
+        await this.performUpdate(resource, data);
+        break;
+      case 'delete':
+        await this.performDelete(resource, data);
+        break;
+      case 'sync':
+        await this.performSync(resource, data);
+        break;
+    }
+  }
+
+  private async performCreate(resource: string, data: any): Promise<void> {
+    const response = await fetch(resource, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
     });
+
+    if (!response.ok) {
+      throw new Error(`Create failed: ${response.status}`);
+    }
   }
 
-  /**
-   * Perform offline detection using cached models
-   */
-  async detectOffline(imageData: string): Promise<Detection[]> {
-    // This would use the cached ML models for offline inference
-    // For demonstration, we'll return mock results
+  private async performUpdate(resource: string, data: any): Promise<void> {
+    const response = await fetch(resource, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Update failed: ${response.status}`);
+    }
+  }
+
+  private async performDelete(resource: string, data: any): Promise<void> {
+    const response = await fetch(resource, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Delete failed: ${response.status}`);
+    }
+  }
+
+  private async performSync(resource: string, data: any): Promise<void> {
+    const response = await fetch(`${resource}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Sync failed: ${response.status}`);
+    }
+
+    const result = await response.json();
     
-    console.log('🤖 Performing offline detection...');
+    if (result.conflicts && result.conflicts.length > 0) {
+      this.handleConflicts(result.conflicts);
+    }
+  }
+
+  private handleConflicts(conflicts: any[]): void {
+    conflicts.forEach(conflict => {
+      const resolution: ConflictResolution = {
+        id: `conflict_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        resource: conflict.resource,
+        clientData: conflict.clientData,
+        serverData: conflict.serverData,
+        strategy: this.config.syncStrategy.conflictResolution,
+        resolved: false,
+        timestamp: Date.now()
+      };
+
+      this.conflictQueue.push(resolution);
+      this.resolveConflict(resolution);
+    });
+
+    this.updateConflicts();
+  }
+
+  private resolveConflict(conflict: ConflictResolution): void {
+    switch (conflict.strategy) {
+      case 'client':
+        conflict.resolution = conflict.clientData;
+        break;
+      case 'server':
+        conflict.resolution = conflict.serverData;
+        break;
+      case 'merge':
+        conflict.resolution = this.mergeData(conflict.clientData, conflict.serverData);
+        break;
+      case 'prompt':
+        // Would typically show UI for user to resolve
+        console.warn('Conflict requires user resolution:', conflict);
+        return;
+    }
+
+    conflict.resolved = true;
+    this.updateConflicts();
+  }
+
+  private mergeData(clientData: any, serverData: any): any {
+    if (typeof clientData === 'object' && typeof serverData === 'object') {
+      return { ...serverData, ...clientData };
+    }
+    return serverData; // Fallback to server data
+  }
+
+  private async processPrefetchQueue(): Promise<void> {
+    if (this.prefetchQueue.length === 0 || !this.networkStatus.isOnline) return;
+
+    const urls = this.prefetchQueue.splice(0, this.config.prefetching.maxConcurrentRequests);
     
-    // Simulate offline processing time
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const offlineDetections: Detection[] = [
-      {
-        label: 'Offline Detected Item',
-        category: 'recycle',
-        confidence: 0.75,
-        bbox: [100, 100, 200, 200],
-        class: 'unknown',
-        instructions: 'Detected offline - sync when online for detailed analysis'
+    const promises = urls.map(async (url) => {
+      try {
+        const cached = this.getFromCache(url);
+        if (!cached) {
+          const data = await this.fetchFromNetwork(url);
+          this.setCache(url, data);
+        }
+      } catch (error) {
+        console.warn('Prefetch failed:', url, error);
       }
-    ];
-    
-    return offlineDetections;
+    });
+
+    await Promise.all(promises);
   }
 
-  /**
-   * Update storage quota information
-   */
-  private async updateStorageQuota(): Promise<void> {
-    if (!('storage' in navigator)) return;
-    
+  private cleanupExpiredCache(): void {
+    const now = Date.now();
+    const expired: string[] = [];
+
+    this.memoryCache.forEach((entry, key) => {
+      if (entry.expiresAt < now) {
+        expired.push(key);
+      }
+    });
+
+    expired.forEach(key => {
+      this.memoryCache.delete(key);
+    });
+
+    if (expired.length > 0) {
+      this.updateCacheSize();
+    }
+  }
+
+  private optimizeCacheSize(): void {
+    const currentSize = this.calculateCacheSize();
+    const maxSize = this.config.maxCacheSize * 1024 * 1024; // Convert MB to bytes
+
+    if (currentSize > maxSize) {
+      const entries = Array.from(this.memoryCache.entries()).sort((a, b) => {
+        // Sort by access count (ascending) and last accessed (ascending)
+        const aScore = a[1].accessCount + (Date.now() - a[1].lastAccessed) / 1000;
+        const bScore = b[1].accessCount + (Date.now() - b[1].lastAccessed) / 1000;
+        return aScore - bScore;
+      });
+
+      let removedSize = 0;
+      const targetSize = maxSize * 0.8; // Remove until 80% of max size
+
+      for (const [key, entry] of entries) {
+        if (currentSize - removedSize <= targetSize) break;
+        
+        this.memoryCache.delete(key);
+        removedSize += entry.size;
+      }
+
+      this.updateCacheSize();
+    }
+  }
+
+  private calculateCacheSize(): number {
+    let totalSize = 0;
+    this.memoryCache.forEach(entry => {
+      totalSize += entry.size;
+    });
+    return totalSize;
+  }
+
+  private persistSyncQueue(): void {
+    if (this.config.storage.localStorage) {
+      localStorage.setItem('ecoscan-sync-queue', JSON.stringify(this.syncQueue));
+    }
+
+    if (this.config.storage.indexedDB && this.indexedDBCache) {
+      this.syncQueue.forEach(item => {
+        this.storeInIndexedDBSync(item);
+      });
+    }
+  }
+
+  private async storeInIndexedDBSync(item: SyncQueue): Promise<void> {
+    if (!this.indexedDBCache) return;
+
     try {
-      const estimate = await navigator.storage.estimate();
-      
-      offlineStatus.update(status => ({
-        ...status,
-        storageQuota: estimate.quota || 0,
-        storageUsed: estimate.usage || 0
-      }));
-      
+      const transaction = this.indexedDBCache.transaction(['syncQueue'], 'readwrite');
+      const store = transaction.objectStore('syncQueue');
+      await store.put(item);
     } catch (error) {
-      console.warn('Failed to get storage estimate:', error);
+      console.error('IndexedDB sync queue write error:', error);
     }
   }
 
-  /**
-   * Start periodic sync process
-   */
-  private startSyncProcess(): void {
-    if (this.syncInterval) return;
-    
-    this.syncInterval = window.setInterval(() => {
-      if (navigator.onLine) {
-        this.syncOfflineData();
-      }
-    }, 30000); // Sync every 30 seconds when online
+  private handleSyncCompleted(data: any): void {
+    this.metrics.syncOperations++;
+    this.metrics.lastSync = Date.now();
+    this.updateMetrics();
   }
 
-  /**
-   * Handle service worker messages
-   */
-  private handleServiceWorkerMessage(event: MessageEvent): void {
-    const { type, data } = event.data;
+  private handleSyncFailed(data: any): void {
+    this.metrics.syncFailures++;
+    this.updateMetrics();
+  }
+
+  private updateNetworkStatus(): void {
+    this.networkStatus.queueLength = this.syncQueue.length;
+    this.networkStatus.cacheSize = this.calculateCacheSize();
+    this.networkStatus.cacheHitRate = this.calculateCacheHitRate();
+    this._offlineStatus.set(this.networkStatus);
+  }
+
+  private updateMetrics(): void {
+    this.metrics.syncQueue = this.syncQueue;
+    this.metrics.cacheEntries = Array.from(this.memoryCache.values());
+    this.metrics.performanceScore = this.calculatePerformanceScore();
+    this._metrics.set(this.metrics);
+  }
+
+  private updateSyncQueue(): void {
+    this._syncQueue.set(this.syncQueue);
+  }
+
+  private updateConflicts(): void {
+    this._conflicts.set(this.conflictQueue);
+  }
+
+  private updateCacheSize(): void {
+    const size = this.calculateCacheSize();
+    this._cacheSize.set(size);
+  }
+
+  private calculateCacheHitRate(): number {
+    const total = this.metrics.cacheHits + this.metrics.cacheMisses;
+    return total > 0 ? (this.metrics.cacheHits / total) * 100 : 0;
+  }
+
+  private calculatePerformanceScore(): number {
+    const cacheHitRate = this.calculateCacheHitRate();
+    const syncSuccessRate = this.metrics.syncOperations > 0 ? 
+      ((this.metrics.syncOperations - this.metrics.syncFailures) / this.metrics.syncOperations) * 100 : 100;
     
-    switch (type) {
-      case 'CACHE_UPDATED':
-        console.log('📥 Service worker cache updated');
-        break;
-      case 'OFFLINE_READY':
-        console.log('📱 App ready for offline use');
-        break;
-      default:
-        console.log('📨 Service worker message:', type, data);
+    return Math.round((cacheHitRate + syncSuccessRate) / 2);
+  }
+
+  private updateAverageResponseTime(responseTime: number): void {
+    const totalRequests = this.metrics.totalRequests;
+    this.metrics.avgResponseTime = ((this.metrics.avgResponseTime * (totalRequests - 1)) + responseTime) / totalRequests;
+  }
+
+  // Public API
+  public isOnline(): boolean {
+    return this.networkStatus.isOnline;
+  }
+
+  public isOffline(): boolean {
+    return this.networkStatus.isOffline;
+  }
+
+  public getNetworkStatus(): OfflineStatus {
+    return { ...this.networkStatus };
+  }
+
+  public getMetrics(): OfflineMetrics {
+    return { ...this.metrics };
+  }
+
+  public getSyncQueue(): SyncQueue[] {
+    return [...this.syncQueue];
+  }
+
+  public getConflicts(): ConflictResolution[] {
+    return [...this.conflictQueue];
+  }
+
+  public async forcSync(): Promise<void> {
+    if (this.networkStatus.isOnline) {
+      await this.processSyncQueue();
     }
   }
 
-  /**
-   * Clean up resources
-   */
-  destroy(): void {
+  public async resolveConflictManually(conflictId: string, resolution: any): Promise<void> {
+    const conflict = this.conflictQueue.find(c => c.id === conflictId);
+    if (conflict) {
+      conflict.resolution = resolution;
+      conflict.resolved = true;
+      this.updateConflicts();
+    }
+  }
+
+  public getCachePolicy(type: keyof OfflineConfig['cachePolicies']): CachePolicy {
+    return this.config.cachePolicies[type];
+  }
+
+  public setCachePolicy(type: keyof OfflineConfig['cachePolicies'], policy: CachePolicy): void {
+    this.config.cachePolicies[type] = policy;
+  }
+
+  public async prefetch(urls: string[]): Promise<void> {
+    this.prefetchQueue.push(...urls);
+    await this.processPrefetchQueue();
+  }
+
+  public cleanup(): void {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
-      this.syncInterval = null;
     }
     
-    if (this.db) {
-      this.db.close();
-      this.db = null;
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
     }
-  }
-
-  // Helper methods
-  private async sendDetectionToAPI(detection: OfflineDetection): Promise<void> {
-    // Mock API call - would integrate with actual backend
-    console.log('📤 Sending detection to API:', detection.id);
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-
-  private async markDetectionSynced(id: string): Promise<void> {
-    if (!this.db) return;
     
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['detections'], 'readwrite');
-      const store = transaction.objectStore('detections');
-      
-      const getRequest = store.get(id);
-      
-      getRequest.onsuccess = () => {
-        const detection = getRequest.result;
-        if (detection) {
-          detection.synced = true;
-          const putRequest = store.put(detection);
-          putRequest.onsuccess = () => resolve();
-          putRequest.onerror = () => reject(putRequest.error);
-        } else {
-          resolve();
-        }
-      };
-      
-      getRequest.onerror = () => reject(getRequest.error);
-    });
-  }
-
-  private async getSyncQueue(): Promise<SyncQueue[]> {
-    if (!this.db) return [];
+    if (this.compressionWorker) {
+      this.compressionWorker.terminate();
+    }
     
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['syncQueue'], 'readonly');
-      const store = transaction.objectStore('syncQueue');
-      const request = store.getAll();
-      
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  private async processQueueItem(item: SyncQueue): Promise<void> {
-    // Process different types of queue items
-    console.log(`📤 Processing queue item: ${item.type}`);
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-
-  private async removeFromSyncQueue(id: string): Promise<void> {
-    if (!this.db) return;
+    if (this.indexedDBCache) {
+      this.indexedDBCache.close();
+    }
     
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['syncQueue'], 'readwrite');
-      const store = transaction.objectStore('syncQueue');
-      const request = store.delete(id);
-      
-      request.onsuccess = () => {
-        syncQueue.update(queue => queue.filter(item => item.id !== id));
-        resolve();
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  private async incrementRetryCount(id: string): Promise<void> {
-    if (!this.db) return;
-    
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['syncQueue'], 'readwrite');
-      const store = transaction.objectStore('syncQueue');
-      
-      const getRequest = store.get(id);
-      
-      getRequest.onsuccess = () => {
-        const item = getRequest.result;
-        if (item) {
-          item.retryCount++;
-          const putRequest = store.put(item);
-          putRequest.onsuccess = () => resolve();
-          putRequest.onerror = () => reject(putRequest.error);
-        } else {
-          resolve();
-        }
-      };
-      
-      getRequest.onerror = () => reject(getRequest.error);
-    });
+    this.memoryCache.clear();
+    this.syncQueue.length = 0;
+    this.conflictQueue.length = 0;
+    this.prefetchQueue.length = 0;
+    this.activeRequests.clear();
   }
 }
 
-// Global offline manager instance
-let globalOfflineManager: OfflineManager | null = null;
+// Global instance
+export const offlineManager = new OfflineManager();
 
-/**
- * Get or create global offline manager
- */
-export function getOfflineManager(): OfflineManager {
-  if (!globalOfflineManager) {
-    globalOfflineManager = new OfflineManager();
-  }
-  return globalOfflineManager;
+// Utility functions
+export function isOnline(): boolean {
+  return offlineManager.isOnline();
 }
 
-/**
- * Quick access functions
- */
-export const offline = {
-  store: (imageData: string, detections: Detection[], location?: GeolocationPosition) =>
-    getOfflineManager().storeDetectionOffline(imageData, detections, location),
-  detect: (imageData: string) => getOfflineManager().detectOffline(imageData),
-  sync: () => getOfflineManager().syncOfflineData(),
-  cache: (modelName: string, modelData: ArrayBuffer) =>
-    getOfflineManager().cacheModel(modelName, modelData),
-  getManager: () => getOfflineManager()
-}; 
+export function isOffline(): boolean {
+  return offlineManager.isOffline();
+}
+
+export function getNetworkStatus(): OfflineStatus {
+  return offlineManager.getNetworkStatus();
+}
+
+export function getCachedData(key: string, policy?: CachePolicy): Promise<any> {
+  return offlineManager.get(key, policy);
+}
+
+export function setCachedData(key: string, data: any, options?: { ttl?: number; priority?: number }): Promise<void> {
+  return offlineManager.set(key, data, options);
+}
+
+export function addToSyncQueue(item: Omit<SyncQueue, 'id' | 'timestamp' | 'retryCount' | 'status'>): void {
+  offlineManager.addToSyncQueue(item);
+}
+
+export function forcSync(): Promise<void> {
+  return offlineManager.forcSync();
+}
+
+export function prefetchUrls(urls: string[]): Promise<void> {
+  return offlineManager.prefetch(urls);
+} 
