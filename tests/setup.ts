@@ -1,443 +1,546 @@
 /**
- * EcoScan Test Setup and Configuration
- * Comprehensive testing utilities for all features
+ * Test Setup Configuration
+ * 
+ * Provides comprehensive test environment setup for all test types:
+ * - Unit tests
+ * - Integration tests
+ * - E2E tests
+ * - Browser environment mocking
+ * - Performance testing utilities
  */
 
-import { vi, expect, beforeEach, afterEach } from 'vitest';
-import { render, type RenderResult } from '@testing-library/svelte';
-import { writable } from 'svelte/store';
+import { vi, beforeEach, afterEach } from 'vitest';
+import { cleanup } from '@testing-library/svelte';
+import '@testing-library/jest-dom';
 
-// Mock browser environment
-global.window = Object.create(window);
-global.document = Object.create(document);
-global.navigator = Object.create(navigator);
-
-// Mock Web APIs
-Object.defineProperty(global.navigator, 'mediaDevices', {
-  value: {
-    getUserMedia: vi.fn(),
-    enumerateDevices: vi.fn(),
-  },
-  writable: true,
-});
-
-Object.defineProperty(global.navigator, 'onLine', {
-  value: true,
-  writable: true,
-});
-
-// Mock Speech Recognition
-global.SpeechRecognition = vi.fn();
-global.webkitSpeechRecognition = vi.fn();
-
-// Mock ONNX Runtime
-vi.mock('onnxruntime-web', () => ({
-  InferenceSession: {
-    create: vi.fn(),
-  },
-  Tensor: vi.fn(),
-  env: {
-    wasm: {
-      wasmPaths: '/models/',
-    },
-  },
-}));
-
-// Mock Performance API
-global.performance = {
-  ...performance,
-  now: vi.fn(() => Date.now()),
-  mark: vi.fn(),
-  measure: vi.fn(),
-  getEntriesByType: vi.fn(() => []),
-};
-
-// Test utilities
-export const testUtils = {
-  // Mock implementations
-  mockCamera: (mockStream: MediaStream | null = null) => {
-    const getUserMedia = vi.fn();
-    if (mockStream) {
-      getUserMedia.mockResolvedValue(mockStream);
-    } else {
-      getUserMedia.mockRejectedValue(new Error('Camera not available'));
-    }
-    
-    vi.mocked(navigator.mediaDevices.getUserMedia).mockImplementation(getUserMedia);
-    return getUserMedia;
-  },
-
-  mockSpeechRecognition: (mockResults: any[] = []) => {
-    const MockSpeechRecognition = vi.fn().mockImplementation(() => ({
-      start: vi.fn(),
-      stop: vi.fn(),
-      abort: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      onresult: null,
-      onerror: null,
-      onend: null,
-      continuous: false,
-      interimResults: false,
-      lang: 'en-US',
-    }));
-    
-    global.SpeechRecognition = MockSpeechRecognition;
-    global.webkitSpeechRecognition = MockSpeechRecognition;
-    
-    return MockSpeechRecognition;
-  },
-
-  mockONNXSession: (mockOutput: any = null) => {
-    const mockSession = {
-      run: vi.fn(),
-      release: vi.fn(),
-    };
-    
-    if (mockOutput) {
-      mockSession.run.mockResolvedValue(mockOutput);
-    }
-    
-    return mockSession;
-  },
-
-  mockImageData: (width: number = 640, height: number = 480): ImageData => {
-    const data = new Uint8ClampedArray(width * height * 4);
-    for (let i = 0; i < data.length; i += 4) {
-      data[i] = 255;     // Red
-      data[i + 1] = 255; // Green
-      data[i + 2] = 255; // Blue
-      data[i + 3] = 255; // Alpha
-    }
-    return { data, width, height, colorSpace: 'srgb' };
-  },
-
-  mockCanvas: () => {
-    const canvas = document.createElement('canvas');
-    const ctx = {
-      getImageData: vi.fn(),
-      putImageData: vi.fn(),
-      drawImage: vi.fn(),
-      clearRect: vi.fn(),
-      fillRect: vi.fn(),
-      strokeRect: vi.fn(),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      stroke: vi.fn(),
-      fill: vi.fn(),
-      save: vi.fn(),
-      restore: vi.fn(),
-      translate: vi.fn(),
-      scale: vi.fn(),
-      rotate: vi.fn(),
-      setTransform: vi.fn(),
-      transform: vi.fn(),
-      createImageData: vi.fn(),
-      getContext: vi.fn(),
-      toDataURL: vi.fn(() => 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k='),
-    };
-    
-    canvas.getContext = vi.fn(() => ctx as any);
-    return { canvas, ctx };
-  },
-
-  mockFile: (name: string, type: string, content: string = 'test content'): File => {
-    const blob = new Blob([content], { type });
-    const file = new File([blob], name, { type });
-    return file;
-  },
-
-  mockFileReader: (result: string | ArrayBuffer | null = null) => {
-    const reader = {
-      readAsDataURL: vi.fn(),
-      readAsArrayBuffer: vi.fn(),
-      readAsText: vi.fn(),
-      onload: null,
-      onerror: null,
-      onprogress: null,
-      result,
-      error: null,
-      readyState: 2, // DONE
-    };
-    
-    // Simulate async read
-    setTimeout(() => {
-      if (reader.onload) {
-        reader.onload({ target: reader } as any);
-      }
-    }, 0);
-    
-    return reader;
-  },
-
-  // Test data generators
-  generateDetectionResult: (overrides: any = {}) => ({
-    bbox: [100, 100, 200, 200],
-    class: 'plastic_bottle',
-    confidence: 0.95,
-    category: 'recycle',
-    ...overrides,
-  }),
-
-  generateVoiceResult: (transcript: string = 'plastic bottle', confidence: number = 0.9) => ({
-    results: [[{
-      transcript,
-      confidence,
-      isFinal: true,
-    }]],
-  }),
-
-  generateImageUploadEvent: (file: File) => ({
-    target: {
-      files: [file],
-    },
-  }),
-
-  // Performance testing utilities
-  measurePerformance: async (fn: () => Promise<any>) => {
-    const start = performance.now();
-    await fn();
-    const end = performance.now();
-    return end - start;
-  },
-
-  // Network simulation
-  simulateNetworkConditions: (online: boolean = true, delay: number = 0) => {
-    Object.defineProperty(navigator, 'onLine', {
-      writable: true,
-      value: online,
-    });
-    
-    if (delay > 0) {
-      // Mock fetch with delay
-      const originalFetch = global.fetch;
-      global.fetch = vi.fn(async (...args) => {
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return originalFetch(...args);
-      });
-    }
-  },
-
-  // Component testing utilities
-  renderWithProviders: (component: any, props: any = {}) => {
-    // Mock stores
-    const mockStores = {
-      isLoading: writable(false),
-      error: writable(null),
-      detections: writable([]),
-      voiceSupported: writable(true),
-      isListening: writable(false),
-      permissionsGranted: writable(false),
-    };
-    
-    return render(component, { props, context: new Map(Object.entries(mockStores)) });
-  },
-
-  // Error simulation
-  simulateError: (type: string, message: string) => {
-    const error = new Error(message);
-    error.name = type;
-    return error;
-  },
-
-  // Wait utilities
-  waitFor: (condition: () => boolean, timeout: number = 5000) => {
-    return new Promise<void>((resolve, reject) => {
-      const start = Date.now();
-      const check = () => {
-        if (condition()) {
-          resolve();
-        } else if (Date.now() - start > timeout) {
-          reject(new Error('Timeout waiting for condition'));
-        } else {
-          setTimeout(check, 100);
-        }
-      };
-      check();
-    });
-  },
-
-  // Accessibility testing
-  checkAccessibility: (element: HTMLElement) => {
-    const issues = [];
-    
-    // Check for alt text on images
-    const images = element.querySelectorAll('img');
-    images.forEach(img => {
-      if (!img.alt) {
-        issues.push('Image missing alt text');
-      }
-    });
-    
-    // Check for button accessibility
-    const buttons = element.querySelectorAll('button');
-    buttons.forEach(button => {
-      if (!button.textContent?.trim() && !button.getAttribute('aria-label')) {
-        issues.push('Button missing accessible label');
-      }
-    });
-    
-    // Check for form labels
-    const inputs = element.querySelectorAll('input, textarea, select');
-    inputs.forEach(input => {
-      const id = input.id;
-      if (id && !element.querySelector(`label[for="${id}"]`)) {
-        issues.push(`Form control missing label: ${id}`);
-      }
-    });
-    
-    return issues;
-  },
-
-  // Memory testing
-  checkMemoryUsage: () => {
-    if (performance.memory) {
-      return {
-        usedJSHeapSize: performance.memory.usedJSHeapSize,
-        totalJSHeapSize: performance.memory.totalJSHeapSize,
-        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
-      };
-    }
-    return null;
-  },
-};
-
-// Test fixtures
-export const testFixtures = {
-  wasteItems: [
-    {
-      name: 'plastic_bottle',
-      category: 'recycle',
-      instructions: 'Remove cap and rinse',
-      confidence: 0.95,
-    },
-    {
-      name: 'apple_core',
-      category: 'compost',
-      instructions: 'Safe for home composting',
-      confidence: 0.88,
-    },
-    {
-      name: 'chip_bag',
-      category: 'landfill',
-      instructions: 'Not recyclable in most areas',
-      confidence: 0.92,
-    },
-  ],
-
-  detectionResults: [
-    {
-      bbox: [100, 100, 200, 200],
-      class: 'plastic_bottle',
-      confidence: 0.95,
-      category: 'recycle',
-    },
-    {
-      bbox: [300, 150, 400, 250],
-      class: 'apple_core',
-      confidence: 0.88,
-      category: 'compost',
-    },
-  ],
-
-  voiceTranscripts: [
-    'plastic bottle',
-    'apple core',
-    'chip bag',
-    'recycling bin',
-    'compost bin',
-  ],
-
-  imageFiles: {
-    validJPEG: new File(['jpeg content'], 'test.jpg', { type: 'image/jpeg' }),
-    validPNG: new File(['png content'], 'test.png', { type: 'image/png' }),
-    invalidFile: new File(['text content'], 'test.txt', { type: 'text/plain' }),
-    oversizedFile: new File([new ArrayBuffer(10 * 1024 * 1024)], 'huge.jpg', { type: 'image/jpeg' }),
-  },
-};
-
-// Custom matchers
-expect.extend({
-  toBeWithinRange(received: number, floor: number, ceiling: number) {
-    const pass = received >= floor && received <= ceiling;
-    if (pass) {
-      return {
-        message: () => `expected ${received} not to be within range ${floor} - ${ceiling}`,
-        pass: true,
-      };
-    } else {
-      return {
-        message: () => `expected ${received} to be within range ${floor} - ${ceiling}`,
-        pass: false,
-      };
-    }
-  },
-
-  toHaveValidDetection(received: any) {
-    const pass = (
-      received &&
-      Array.isArray(received.bbox) &&
-      received.bbox.length === 4 &&
-      typeof received.class === 'string' &&
-      typeof received.confidence === 'number' &&
-      received.confidence >= 0 &&
-      received.confidence <= 1
-    );
-    
-    if (pass) {
-      return {
-        message: () => `expected ${received} not to be a valid detection`,
-        pass: true,
-      };
-    } else {
-      return {
-        message: () => `expected ${received} to be a valid detection`,
-        pass: false,
-      };
-    }
-  },
-
-  toBeAccessible(received: HTMLElement) {
-    const issues = testUtils.checkAccessibility(received);
-    const pass = issues.length === 0;
-    
-    if (pass) {
-      return {
-        message: () => `expected element to have accessibility issues`,
-        pass: true,
-      };
-    } else {
-      return {
-        message: () => `expected element to be accessible, but found issues: ${issues.join(', ')}`,
-        pass: false,
-      };
-    }
-  },
-});
-
-// Global test setup
+// Global test configuration
 beforeEach(() => {
+  // Clean up DOM after each test
+  cleanup();
+  
   // Reset all mocks
   vi.clearAllMocks();
   
-  // Reset DOM
-  document.head.innerHTML = '';
-  document.body.innerHTML = '';
+  // Setup browser environment
+  setupBrowserEnvironment();
   
-  // Reset navigator
-  Object.defineProperty(navigator, 'onLine', {
-    writable: true,
-    value: true,
-  });
+  // Setup console mocking
+  setupConsoleMocking();
   
-  // Reset performance
-  vi.clearAllTimers();
+  // Setup performance monitoring
+  setupPerformanceMonitoring();
 });
 
 afterEach(() => {
-  // Cleanup
-  vi.restoreAllMocks();
+  // Additional cleanup
+  cleanup();
+  
+  // Clear any timers
+  vi.clearAllTimers();
+  
+  // Clear any intervals (note: vitest doesn't have clearAllIntervals)
+  // This would be done by vi.useRealTimers() in real scenarios
+  
+  // Reset modules
+  vi.resetModules();
 });
 
+/**
+ * Setup browser environment for testing
+ */
+function setupBrowserEnvironment() {
+  // Mock window object
+  Object.defineProperty(global, 'window', {
+    value: {
+      ...global.window,
+      location: {
+        href: 'http://localhost:5173',
+        origin: 'http://localhost:5173',
+        protocol: 'http:',
+        host: 'localhost:5173'
+      },
+      localStorage: {
+        getItem: vi.fn(),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn()
+      },
+      sessionStorage: {
+        getItem: vi.fn(),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn()
+      },
+      dispatchEvent: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      requestAnimationFrame: vi.fn((cb) => setTimeout(cb, 16)),
+      cancelAnimationFrame: vi.fn(),
+      URL: {
+        createObjectURL: vi.fn(() => 'blob:mock-url'),
+        revokeObjectURL: vi.fn()
+      }
+    },
+    configurable: true,
+    writable: true
+  });
+
+  // Mock document object
+  Object.defineProperty(global, 'document', {
+    value: {
+      ...global.document,
+      createElement: vi.fn((tagName) => {
+        const element = {
+          tagName: tagName.toUpperCase(),
+          style: {},
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          appendChild: vi.fn(),
+          removeChild: vi.fn(),
+          querySelector: vi.fn(),
+          querySelectorAll: vi.fn(() => []),
+          getAttribute: vi.fn(),
+          setAttribute: vi.fn(),
+          removeAttribute: vi.fn(),
+          classList: {
+            add: vi.fn(),
+            remove: vi.fn(),
+            contains: vi.fn(),
+            toggle: vi.fn()
+          }
+        };
+
+        // Canvas-specific mocking
+        if (tagName === 'canvas') {
+          return {
+            ...element,
+            width: 640,
+            height: 640,
+            getContext: vi.fn(() => ({
+              drawImage: vi.fn(),
+              getImageData: vi.fn(() => ({
+                data: new Uint8ClampedArray(640 * 640 * 4),
+                width: 640,
+                height: 640
+              })),
+              putImageData: vi.fn(),
+              clearRect: vi.fn(),
+              fillRect: vi.fn(),
+              strokeRect: vi.fn(),
+              beginPath: vi.fn(),
+              moveTo: vi.fn(),
+              lineTo: vi.fn(),
+              stroke: vi.fn(),
+              fill: vi.fn()
+            })),
+            toDataURL: vi.fn(() => 'data:image/png;base64,mock-data'),
+            toBlob: vi.fn((callback) => callback(new Blob(['mock'], { type: 'image/png' })))
+          };
+        }
+
+        // Video-specific mocking
+        if (tagName === 'video') {
+          return {
+            ...element,
+            play: vi.fn(),
+            pause: vi.fn(),
+            load: vi.fn(),
+            currentTime: 0,
+            duration: 0,
+            paused: true,
+            ended: false,
+            volume: 1,
+            muted: false,
+            srcObject: null,
+            src: '',
+            width: 640,
+            height: 480
+          };
+        }
+
+        return element;
+      }),
+      getElementById: vi.fn(),
+      querySelector: vi.fn(),
+      querySelectorAll: vi.fn(() => []),
+      body: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+        querySelector: vi.fn(),
+        querySelectorAll: vi.fn(() => []),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+      },
+      head: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn()
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    },
+    configurable: true,
+    writable: true
+  });
+
+  // Mock navigator
+  Object.defineProperty(global, 'navigator', {
+    value: {
+      userAgent: 'Mozilla/5.0 (Test Browser) Test/1.0',
+      hardwareConcurrency: 4,
+      deviceMemory: 4,
+      onLine: true,
+      mediaDevices: {
+        getUserMedia: vi.fn(() => Promise.resolve({
+          getTracks: vi.fn(() => []),
+          getVideoTracks: vi.fn(() => []),
+          getAudioTracks: vi.fn(() => [])
+        })),
+        enumerateDevices: vi.fn(() => Promise.resolve([]))
+      },
+      permissions: {
+        query: vi.fn(() => Promise.resolve({ state: 'granted' }))
+      },
+      clipboard: {
+        writeText: vi.fn(() => Promise.resolve()),
+        readText: vi.fn(() => Promise.resolve(''))
+      }
+    },
+    configurable: true,
+    writable: true
+  });
+
+  // Mock performance API
+  Object.defineProperty(global, 'performance', {
+    value: {
+      now: vi.fn(() => Date.now()),
+      mark: vi.fn(),
+      measure: vi.fn(),
+      clearMarks: vi.fn(),
+      clearMeasures: vi.fn(),
+      getEntriesByName: vi.fn(() => []),
+      getEntriesByType: vi.fn(() => []),
+      timing: {
+        navigationStart: Date.now() - 1000,
+        loadEventEnd: Date.now(),
+        domContentLoadedEventEnd: Date.now() - 500
+      },
+      memory: {
+        usedJSHeapSize: 10000000,
+        totalJSHeapSize: 20000000,
+        jsHeapSizeLimit: 2000000000
+      }
+    },
+    configurable: true,
+    writable: true
+  });
+
+  // Mock Web APIs
+  mockWebAPIs();
+}
+
+/**
+ * Mock Web APIs for testing
+ */
+function mockWebAPIs() {
+  // Mock fetch
+  global.fetch = vi.fn(() => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(''),
+    blob: () => Promise.resolve(new Blob()),
+    arrayBuffer: () => Promise.resolve(new ArrayBuffer(0))
+  } as any));
+
+  // Mock Worker
+  global.Worker = vi.fn(() => ({
+    postMessage: vi.fn(),
+    terminate: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    onmessage: null,
+    onerror: null,
+    onmessageerror: null
+  })) as any;
+
+  // Mock ImageData
+  global.ImageData = class MockImageData {
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
+
+    constructor(dataOrWidth: Uint8ClampedArray | number, width?: number, height?: number) {
+      if (typeof dataOrWidth === 'number') {
+        this.width = dataOrWidth;
+        this.height = width!;
+        this.data = new Uint8ClampedArray(dataOrWidth * width! * 4);
+      } else {
+        this.data = dataOrWidth;
+        this.width = width!;
+        this.height = height!;
+      }
+    }
+  } as any;
+
+  // Mock File and FileReader
+  global.File = class MockFile {
+    name: string;
+    size: number;
+    type: string;
+    lastModified: number;
+
+    constructor(chunks: any[], filename: string, options: any = {}) {
+      this.name = filename;
+      this.size = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      this.type = options.type || '';
+      this.lastModified = options.lastModified || Date.now();
+    }
+  } as any;
+
+  global.FileReader = class MockFileReader {
+    result: any = null;
+    error: any = null;
+    readyState: number = 0;
+    onload: any = null;
+    onerror: any = null;
+    onabort: any = null;
+    onloadstart: any = null;
+    onloadend: any = null;
+    onprogress: any = null;
+
+    readAsDataURL(file: any) {
+      setTimeout(() => {
+        this.readyState = 2;
+        this.result = 'data:image/jpeg;base64,mock-data';
+        if (this.onload) {
+          this.onload({ target: this });
+        }
+      }, 10);
+    }
+
+    readAsArrayBuffer(file: any) {
+      setTimeout(() => {
+        this.readyState = 2;
+        this.result = new ArrayBuffer(file.size || 1000);
+        if (this.onload) {
+          this.onload({ target: this });
+        }
+      }, 10);
+    }
+
+    readAsText(file: any) {
+      setTimeout(() => {
+        this.readyState = 2;
+        this.result = 'mock text content';
+        if (this.onload) {
+          this.onload({ target: this });
+        }
+      }, 10);
+    }
+
+    abort() {
+      this.readyState = 2;
+      if (this.onabort) {
+        this.onabort({ target: this });
+      }
+    }
+  } as any;
+
+  // Mock Speech Recognition
+  global.SpeechRecognition = class MockSpeechRecognition {
+    continuous: boolean = false;
+    interimResults: boolean = false;
+    lang: string = 'en-US';
+    maxAlternatives: number = 1;
+    serviceURI: string = '';
+    grammars: any = null;
+
+    onstart: any = null;
+    onend: any = null;
+    onerror: any = null;
+    onresult: any = null;
+    onnomatch: any = null;
+    onspeechstart: any = null;
+    onspeechend: any = null;
+    onsoundstart: any = null;
+    onsoundend: any = null;
+    onaudiostart: any = null;
+    onaudioend: any = null;
+
+    start() {
+      setTimeout(() => {
+        if (this.onstart) this.onstart({});
+      }, 100);
+    }
+
+    stop() {
+      setTimeout(() => {
+        if (this.onend) this.onend({});
+      }, 100);
+    }
+
+    abort() {
+      setTimeout(() => {
+        if (this.onend) this.onend({});
+      }, 50);
+    }
+  } as any;
+
+  global.webkitSpeechRecognition = global.SpeechRecognition;
+
+  // Mock IntersectionObserver
+  global.IntersectionObserver = class MockIntersectionObserver {
+    constructor(callback: any, options?: any) {}
+    observe(element: any) {}
+    unobserve(element: any) {}
+    disconnect() {}
+  } as any;
+
+  // Mock ResizeObserver
+  global.ResizeObserver = class MockResizeObserver {
+    constructor(callback: any) {}
+    observe(element: any) {}
+    unobserve(element: any) {}
+    disconnect() {}
+  } as any;
+
+  // Mock MutationObserver
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback: any) {}
+    observe(element: any, options?: any) {}
+    disconnect() {}
+    takeRecords() { return []; }
+  } as any;
+}
+
+/**
+ * Setup console mocking for tests
+ */
+function setupConsoleMocking() {
+  // Store original console methods
+  const originalConsole = { ...console };
+
+  // Mock console methods while preserving them for debugging
+  global.console = {
+    ...originalConsole,
+    log: vi.fn((...args) => {
+      if (process.env.VITEST_DEBUG) {
+        originalConsole.log(...args);
+      }
+    }),
+    warn: vi.fn((...args) => {
+      if (process.env.VITEST_DEBUG) {
+        originalConsole.warn(...args);
+      }
+    }),
+    error: vi.fn((...args) => {
+      if (process.env.VITEST_DEBUG) {
+        originalConsole.error(...args);
+      }
+    }),
+    debug: vi.fn((...args) => {
+      if (process.env.VITEST_DEBUG) {
+        originalConsole.debug(...args);
+      }
+    }),
+    info: vi.fn((...args) => {
+      if (process.env.VITEST_DEBUG) {
+        originalConsole.info(...args);
+      }
+    })
+  };
+}
+
+/**
+ * Setup performance monitoring for tests
+ */
+function setupPerformanceMonitoring() {
+  // Mock high-resolution timer
+  if (!global.performance.now) {
+    global.performance.now = vi.fn(() => Date.now());
+  }
+
+  // Mock performance observer
+  global.PerformanceObserver = class MockPerformanceObserver {
+    constructor(callback: any) {}
+    observe(options: any) {}
+    disconnect() {}
+    takeRecords() { return []; }
+  } as any;
+
+  // Mock performance entry
+  global.PerformanceEntry = class MockPerformanceEntry {
+    name: string = '';
+    entryType: string = '';
+    startTime: number = 0;
+    duration: number = 0;
+  } as any;
+}
+
+/**
+ * Test utilities
+ */
+export const testUtils = {
+  // Wait for next tick
+  nextTick: () => new Promise(resolve => setTimeout(resolve, 0)),
+  
+  // Wait for specified time
+  wait: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
+  
+  // Mock async operation
+  mockAsyncOperation: <T>(result: T, delay: number = 100) => 
+    new Promise<T>(resolve => setTimeout(() => resolve(result), delay)),
+  
+  // Create mock event
+  createMockEvent: (type: string, properties: any = {}) => ({
+    type,
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+    target: {},
+    currentTarget: {},
+    ...properties
+  }),
+  
+  // Create mock file
+  createMockFile: (name: string, type: string, size: number = 1000) => 
+    new File(['mock content'], name, { type, lastModified: Date.now() }),
+  
+  // Mock canvas context
+  createMockCanvasContext: () => ({
+    drawImage: vi.fn(),
+    getImageData: vi.fn(() => ({
+      data: new Uint8ClampedArray(640 * 640 * 4),
+      width: 640,
+      height: 640
+    })),
+    putImageData: vi.fn(),
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    strokeRect: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    stroke: vi.fn(),
+    fill: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    rotate: vi.fn(),
+    scale: vi.fn()
+  }),
+  
+  // Mock performance measurement
+  measurePerformance: async (fn: () => Promise<any> | any) => {
+    const start = performance.now();
+    const result = await fn();
+    const end = performance.now();
+    return {
+      result,
+      duration: end - start
+    };
+  }
+};
+
+// Export test utilities for use in tests
 export default testUtils; 
