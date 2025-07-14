@@ -330,3 +330,24 @@ export const enhancedAnalytics = new EnhancedAnalyticsSystem();
 if (browser) {
   enhancedAnalytics.startTracking();
 }
+
+// Export commonly used functions
+export const trackEvent = (name: string, category: AnalyticsEvent['category'], properties?: Record<string, any>) => {
+  enhancedAnalytics.trackEvent(name, category, properties);
+};
+
+export const trackUserInteraction = (action: string, element: string, context?: Record<string, any>) => {
+  enhancedAnalytics.trackUserInteraction(action, element, context);
+};
+
+export const trackMLInference = (inferenceTime: number, detectionCount: number, confidence: number) => {
+  enhancedAnalytics.trackMLInference(inferenceTime, detectionCount, confidence);
+};
+
+export const trackError = (error: string, context: string, severity: 'low' | 'medium' | 'high' | 'critical') => {
+  enhancedAnalytics.trackError(error, context, severity);
+};
+
+export const trackPerformance = (metric: string, value: number, unit: string) => {
+  enhancedAnalytics.trackPerformance(metric, value, unit);
+};
