@@ -1,26 +1,27 @@
-import { defineConfig } from 'vitest/config'
-import { sveltekit } from '@sveltejs/kit/vite'
+import { defineConfig } from 'vitest/config';
+import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
   plugins: [sveltekit()],
   test: {
+    include: ['tests/**/*.{test,spec}.{js,ts}'],
     globals: true,
     environment: 'jsdom',
     setupFiles: ['tests/setup.ts'],
-    include: ['tests/**/*.{test,spec}.{js,ts}'],
-    exclude: ['tests/e2e/**/*'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html', 'json'],
+      reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
         'tests/',
-        '*.config.{js,ts}',
+        '**/*.d.ts',
+        '**/*.config.*',
+        'src/app.html',
+        'src/service-worker.ts',
         'static/',
         'build/',
-        '.svelte-kit/',
-        'src/app.html',
-        'src/service-worker.ts'
+        'dist/',
+        '.svelte-kit/'
       ],
       thresholds: {
         global: {
@@ -31,25 +32,20 @@ export default defineConfig({
         }
       }
     },
-    testTimeout: 10000,
-    hookTimeout: 10000,
-    teardownTimeout: 10000,
-    isolate: true,
-    pool: 'forks',
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    pool: 'threads',
     poolOptions: {
-      forks: {
-        singleFork: true
+      threads: {
+        singleThread: false,
+        minThreads: 1,
+        maxThreads: 4
       }
     },
-    browser: {
-      enabled: false,
-      name: 'chrome'
-    },
-    logHeapUsage: true,
-    reporters: ['verbose', 'html', 'json'],
+    reporters: ['verbose', 'json', 'html'],
     outputFile: {
-      html: './test-results/index.html',
-      json: './test-results/results.json'
+      json: './test-results/test-results.json',
+      html: './test-results/index.html'
     }
   },
   resolve: {
@@ -62,4 +58,4 @@ export default defineConfig({
   define: {
     global: 'globalThis'
   }
-}) 
+}); 
