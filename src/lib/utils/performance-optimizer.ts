@@ -1,333 +1,604 @@
 /**
- * Performance Optimization System
- * Automatically optimizes application performance based on device capabilities
+ * Performance Optimization System for EcoScan
+ * 
+ * Provides intelligent performance optimization based on:
+ * - Device capabilities and performance tier
+ * - Real-time performance monitoring
+ * - Adaptive configuration adjustments
+ * - Memory management and cleanup
+ * - Network-aware optimizations
  */
 
 import { browser } from '$app/environment';
-import { diagnostic } from './diagnostic.js';
-import { getDeviceMemory, getHardwareConcurrency } from './ssr-safe.js';
+import { performanceAnalyzer } from './performance-analysis.js';
 
-export interface OptimizationSettings {
-  maxFPS: number;
-  imageQuality: number;
-  enableWebGL: boolean;
-  enableMultithreading: boolean;
-  cacheStrategy: 'aggressive' | 'moderate' | 'minimal';
-  memoryLimit: number;
+interface OptimizationConfig {
+  inputResolution: [number, number];
+  batchSize: number;
+  confidenceThreshold: number;
+  maxDetections: number;
+  frameSkipping: number;
+  enableEnsemble: boolean;
+  enableLLM: boolean;
+  executionProviders: string[];
+  memoryManagement: MemoryManagementConfig;
+  networkOptimization: NetworkOptimizationConfig;
 }
 
-export interface DeviceProfile {
-  tier: 'low' | 'medium' | 'high';
-  memory: number;
-  cores: number;
-  isLowEndDevice: boolean;
-  isMobile: boolean;
+interface MemoryManagementConfig {
+  maxMemoryUsage: number; // MB
+  gcTriggerThreshold: number; // MB
+  tensorCleanupInterval: number; // ms
+  cacheSize: number; // Number of cached results
+  enableMemoryPressureHandling: boolean;
 }
 
-class PerformanceOptimizer {
-  private currentSettings: OptimizationSettings;
-  private deviceProfile: DeviceProfile;
-  private optimizationHistory: Array<{ timestamp: number; action: string; result: string }> = [];
+interface NetworkOptimizationConfig {
+  modelLoadingStrategy: 'eager' | 'lazy' | 'progressive';
+  enableCompression: boolean;
+  retryAttempts: number;
+  timeoutMs: number;
+  enableOfflineMode: boolean;
+}
+
+interface PerformanceProfile {
+  tier: 'low' | 'medium' | 'high' | 'ultra';
+  targetFPS: number;
+  maxInferenceTime: number;
+  memoryBudget: number;
+  capabilities: DeviceCapabilities;
+}
+
+interface DeviceCapabilities {
+  coreCount: number;
+  memoryEstimate: number;
+  webglSupport: boolean;
+  webgpuSupport: boolean;
+  hardwareAcceleration: boolean;
+  connectionType: string;
+  batteryAware: boolean;
+}
+
+interface OptimizationMetrics {
+  inferenceTime: number;
+  memoryUsage: number;
+  frameRate: number;
+  accuracy: number;
+  powerConsumption: number;
+  networkLatency: number;
+}
+
+export class PerformanceOptimizer {
+  private config: OptimizationConfig;
+  private profile: PerformanceProfile;
+  private metrics: OptimizationMetrics;
+  private isOptimizing = false;
+  private optimizationHistory: OptimizationMetrics[] = [];
+  private memoryMonitor?: MemoryMonitor;
+  private networkMonitor?: NetworkMonitor;
+  private batteryMonitor?: BatteryMonitor;
+
+  // Predefined optimization profiles
+  private static readonly OPTIMIZATION_PROFILES: Record<string, Partial<OptimizationConfig>> = {
+    'ultra': {
+      inputResolution: [640, 640],
+      batchSize: 1,
+      confidenceThreshold: 0.5,
+      maxDetections: 15,
+      frameSkipping: 0,
+      enableEnsemble: true,
+      enableLLM: true,
+      executionProviders: ['webgpu', 'webgl', 'wasm', 'cpu']
+    },
+    'high': {
+      inputResolution: [512, 512],
+      batchSize: 1,
+      confidenceThreshold: 0.6,
+      maxDetections: 12,
+      frameSkipping: 1,
+      enableEnsemble: true,
+      enableLLM: true,
+      executionProviders: ['webgl', 'wasm', 'cpu']
+    },
+    'medium': {
+      inputResolution: [416, 416],
+      batchSize: 1,
+      confidenceThreshold: 0.7,
+      maxDetections: 8,
+      frameSkipping: 2,
+      enableEnsemble: false,
+      enableLLM: true,
+      executionProviders: ['webgl', 'cpu']
+    },
+    'low': {
+      inputResolution: [320, 320],
+      batchSize: 1,
+      confidenceThreshold: 0.8,
+      maxDetections: 5,
+      frameSkipping: 3,
+      enableEnsemble: false,
+      enableLLM: false,
+      executionProviders: ['cpu']
+    },
+    'battery-saver': {
+      inputResolution: [256, 256],
+      batchSize: 1,
+      confidenceThreshold: 0.8,
+      maxDetections: 3,
+      frameSkipping: 4,
+      enableEnsemble: false,
+      enableLLM: false,
+      executionProviders: ['cpu']
+    }
+  };
 
   constructor() {
-    this.deviceProfile = this.analyzeDevice();
-    this.currentSettings = this.generateOptimalSettings();
-    
+    this.config = this.getDefaultConfig();
+    this.profile = this.getDefaultProfile();
+    this.metrics = this.getDefaultMetrics();
+
     if (browser) {
-      this.initializeOptimizations();
+      this.initializeMonitoring();
     }
   }
 
-  private analyzeDevice(): DeviceProfile {
-    const memory = getDeviceMemory();
-    const cores = getHardwareConcurrency();
-    const userAgent = navigator?.userAgent || '';
-    const isMobile = /Mobile|Android|iPhone|iPad/.test(userAgent);
+  async initialize(): Promise<void> {
+    if (!browser) return;
+
+    // Analyze device capabilities
+    const capabilities = await performanceAnalyzer.analyzeDeviceCapabilities();
+    this.profile.capabilities = {
+      ...capabilities,
+      hardwareAcceleration: capabilities.webglSupport || capabilities.webgpuSupport,
+      connectionType: 'wifi', // Default assumption
+      batteryAware: 'getBattery' in navigator
+    };
+
+    // Determine optimal profile
+    this.profile.tier = this.determinePerformanceTier(capabilities);
     
-    let tier: 'low' | 'medium' | 'high' = 'medium';
-    
-    // Determine device tier based on specs
-    if (memory <= 2 || cores <= 2) {
-      tier = 'low';
-    } else if (memory >= 8 && cores >= 4) {
-      tier = 'high';
-    }
-    
-    const isLowEndDevice = tier === 'low' || (isMobile && memory <= 4);
-    
-    diagnostic.logWarning(`Device profile: ${tier} tier, ${memory}GB memory, ${cores} cores, mobile: ${isMobile}`, 'PerformanceOptimizer');
-    
+    // Apply optimization profile
+    this.applyOptimizationProfile(this.profile.tier);
+
+    // Start monitoring
+    this.startPerformanceMonitoring();
+
+    console.log(`🎯 Performance optimizer initialized for ${this.profile.tier} tier`);
+  }
+
+  private getDefaultConfig(): OptimizationConfig {
     return {
-      tier,
-      memory,
-      cores,
-      isLowEndDevice,
-      isMobile
+      inputResolution: [416, 416],
+      batchSize: 1,
+      confidenceThreshold: 0.6,
+      maxDetections: 10,
+      frameSkipping: 1,
+      enableEnsemble: false,
+      enableLLM: true,
+      executionProviders: ['webgl', 'cpu'],
+      memoryManagement: {
+        maxMemoryUsage: 200,
+        gcTriggerThreshold: 150,
+        tensorCleanupInterval: 5000,
+        cacheSize: 50,
+        enableMemoryPressureHandling: true
+      },
+      networkOptimization: {
+        modelLoadingStrategy: 'lazy',
+        enableCompression: true,
+        retryAttempts: 3,
+        timeoutMs: 10000,
+        enableOfflineMode: true
+      }
     };
   }
 
-  private generateOptimalSettings(): OptimizationSettings {
-    const { tier, isLowEndDevice, isMobile } = this.deviceProfile;
-    
-    let settings: OptimizationSettings;
-    
-    switch (tier) {
-      case 'low':
-        settings = {
-          maxFPS: 15,
-          imageQuality: 0.6,
-          enableWebGL: false,
-          enableMultithreading: false,
-          cacheStrategy: 'minimal',
-          memoryLimit: 100 // MB
-        };
-        break;
-      
-      case 'high':
-        settings = {
-          maxFPS: 60,
-          imageQuality: 0.9,
-          enableWebGL: true,
-          enableMultithreading: true,
-          cacheStrategy: 'aggressive',
-          memoryLimit: 500 // MB
-        };
-        break;
-      
-      default: // medium
-        settings = {
-          maxFPS: 30,
-          imageQuality: 0.8,
-          enableWebGL: true,
-          enableMultithreading: false,
-          cacheStrategy: 'moderate',
-          memoryLimit: 250 // MB
-        };
-    }
-    
-    // Mobile-specific adjustments
-    if (isMobile) {
-      settings.maxFPS = Math.min(settings.maxFPS, 30);
-      settings.imageQuality *= 0.9;
-      settings.memoryLimit *= 0.8;
-    }
-    
-    diagnostic.logWarning(`Generated optimization settings: ${JSON.stringify(settings)}`, 'PerformanceOptimizer');
-    
-    return settings;
-  }
-
-  private initializeOptimizations(): void {
-    this.recordOptimization('initialization', 'Applied device-specific settings');
-    
-    // Apply memory optimizations
-    this.optimizeMemoryUsage();
-    
-    // Apply rendering optimizations
-    this.optimizeRendering();
-    
-    // Apply network optimizations
-    this.optimizeNetworking();
-    
-    // Setup performance monitoring
-    this.setupPerformanceMonitoring();
-  }
-
-  private optimizeMemoryUsage(): void {
-    try {
-      // Configure garbage collection hints
-      if ('gc' in window && this.deviceProfile.isLowEndDevice) {
-        // More aggressive GC for low-end devices
-        setInterval(() => {
-          if ((performance as any).memory) {
-            const memInfo = (performance as any).memory;
-            const usage = memInfo.usedJSHeapSize / (1024 * 1024); // MB
-            
-            if (usage > this.currentSettings.memoryLimit) {
-              (window as any).gc();
-              diagnostic.logWarning(`Triggered GC: ${usage.toFixed(1)}MB usage`, 'PerformanceOptimizer');
-            }
-          }
-        }, 5000);
+  private getDefaultProfile(): PerformanceProfile {
+    return {
+      tier: 'medium',
+      targetFPS: 15,
+      maxInferenceTime: 100,
+      memoryBudget: 200,
+      capabilities: {
+        coreCount: 4,
+        memoryEstimate: 4096,
+        webglSupport: true,
+        webgpuSupport: false,
+        hardwareAcceleration: true,
+        connectionType: 'wifi',
+        batteryAware: false
       }
-      
-      // Configure cache limits
-      if ('caches' in window) {
-        this.configureCacheStrategy();
-      }
-      
-      this.recordOptimization('memory', 'Configured memory management');
-    } catch (error) {
-      diagnostic.logError(`Memory optimization failed: ${error}`, 'PerformanceOptimizer');
+    };
+  }
+
+  private getDefaultMetrics(): OptimizationMetrics {
+    return {
+      inferenceTime: 0,
+      memoryUsage: 0,
+      frameRate: 0,
+      accuracy: 0,
+      powerConsumption: 0,
+      networkLatency: 0
+    };
+  }
+
+  private determinePerformanceTier(capabilities: any): 'low' | 'medium' | 'high' | 'ultra' {
+    let score = 0;
+
+    // Core count scoring (25%)
+    if (capabilities.coreCount >= 8) score += 25;
+    else if (capabilities.coreCount >= 4) score += 15;
+    else score += 5;
+
+    // Memory scoring (25%)
+    if (capabilities.memoryEstimate >= 8192) score += 25;
+    else if (capabilities.memoryEstimate >= 4096) score += 15;
+    else if (capabilities.memoryEstimate >= 2048) score += 10;
+    else score += 5;
+
+    // GPU support scoring (50%)
+    if (capabilities.webgpuSupport) score += 50;
+    else if (capabilities.webglSupport) score += 30;
+    else score += 0;
+
+    // Determine tier based on score
+    if (score >= 85) return 'ultra';
+    if (score >= 65) return 'high';
+    if (score >= 40) return 'medium';
+    return 'low';
+  }
+
+  private applyOptimizationProfile(tier: string): void {
+    const profile = PerformanceOptimizer.OPTIMIZATION_PROFILES[tier];
+    if (profile) {
+      this.config = { ...this.config, ...profile };
+      console.log(`⚙️ Applied ${tier} optimization profile:`, this.config);
     }
   }
 
-  private optimizeRendering(): void {
-    try {
-      // Configure frame rate limiting
-      if (this.currentSettings.maxFPS < 60) {
-        // Implement frame rate limiting for lower-end devices
-        this.implementFrameRateLimiting();
-      }
-      
-      // Configure image quality
-      this.configureImageOptimization();
-      
-      this.recordOptimization('rendering', `Configured for ${this.currentSettings.maxFPS}FPS`);
-    } catch (error) {
-      diagnostic.logError(`Rendering optimization failed: ${error}`, 'PerformanceOptimizer');
+  private initializeMonitoring(): void {
+    // Memory monitoring
+    this.memoryMonitor = new MemoryMonitor(this.config.memoryManagement);
+    this.memoryMonitor.onMemoryPressure = (usage) => {
+      this.handleMemoryPressure(usage);
+    };
+
+    // Network monitoring
+    this.networkMonitor = new NetworkMonitor(this.config.networkOptimization);
+    this.networkMonitor.onNetworkChange = (info) => {
+      this.handleNetworkChange(info);
+    };
+
+    // Battery monitoring
+    if ('getBattery' in navigator) {
+      this.batteryMonitor = new BatteryMonitor();
+      this.batteryMonitor.onBatteryChange = (info) => {
+        this.handleBatteryChange(info);
+      };
     }
   }
 
-  private optimizeNetworking(): void {
-    try {
-      // Configure preload strategy based on device tier
-      if (this.deviceProfile.tier === 'high') {
-        this.enableAggressivePreloading();
-      } else {
-        this.enableConservativePreloading();
-      }
-      
-      this.recordOptimization('networking', `Applied ${this.currentSettings.cacheStrategy} caching`);
-    } catch (error) {
-      diagnostic.logError(`Network optimization failed: ${error}`, 'PerformanceOptimizer');
+  private startPerformanceMonitoring(): void {
+    setInterval(() => {
+      this.updatePerformanceMetrics();
+      this.optimizeIfNeeded();
+    }, 1000); // Check every second
+  }
+
+  private updatePerformanceMetrics(): void {
+    if (!browser) return;
+
+    // Update metrics from performance API
+    if ('memory' in performance) {
+      const memory = (performance as any).memory;
+      this.metrics.memoryUsage = memory.usedJSHeapSize / (1024 * 1024); // MB
+    }
+
+    // Store metrics history
+    this.optimizationHistory.push({ ...this.metrics });
+    
+    // Keep only last 60 measurements (1 minute)
+    if (this.optimizationHistory.length > 60) {
+      this.optimizationHistory.shift();
     }
   }
 
-  private setupPerformanceMonitoring(): void {
-    if ('PerformanceObserver' in window) {
-      try {
-        const observer = new PerformanceObserver((list) => {
-          const entries = list.getEntries();
-          entries.forEach(entry => {
-            if (entry.entryType === 'measure' || entry.entryType === 'navigation') {
-              this.analyzePerformanceMetric(entry);
-            }
-          });
-        });
+  private optimizeIfNeeded(): void {
+    if (this.isOptimizing) return;
+
+    const shouldOptimize = this.shouldOptimize();
+    if (shouldOptimize) {
+      this.performDynamicOptimization();
+    }
+  }
+
+  private shouldOptimize(): boolean {
+    // Check if performance is below targets
+    if (this.metrics.inferenceTime > this.profile.maxInferenceTime * 1.5) return true;
+    if (this.metrics.frameRate < this.profile.targetFPS * 0.8) return true;
+    if (this.metrics.memoryUsage > this.profile.memoryBudget * 0.9) return true;
+
+    // Check for degrading performance trends
+    if (this.optimizationHistory.length >= 10) {
+      const recent = this.optimizationHistory.slice(-10);
+      const older = this.optimizationHistory.slice(-20, -10);
+      
+      if (recent.length === 10 && older.length === 10) {
+        const recentAvg = recent.reduce((sum, m) => sum + m.inferenceTime, 0) / 10;
+        const olderAvg = older.reduce((sum, m) => sum + m.inferenceTime, 0) / 10;
         
-        observer.observe({ entryTypes: ['measure', 'navigation', 'paint'] });
-        diagnostic.logWarning('Performance monitoring enabled', 'PerformanceOptimizer');
-      } catch (error) {
-        diagnostic.logError(`Performance monitoring setup failed: ${error}`, 'PerformanceOptimizer');
+        if (recentAvg > olderAvg * 1.2) return true; // 20% performance degradation
+      }
+    }
+
+    return false;
+  }
+
+  private async performDynamicOptimization(): Promise<void> {
+    if (this.isOptimizing) return;
+    this.isOptimizing = true;
+
+    try {
+      console.log('🔧 Performing dynamic optimization...');
+
+      // Memory optimization
+      if (this.metrics.memoryUsage > this.profile.memoryBudget * 0.8) {
+        await this.optimizeMemoryUsage();
+      }
+
+      // Performance optimization
+      if (this.metrics.inferenceTime > this.profile.maxInferenceTime) {
+        this.optimizeInferencePerformance();
+      }
+
+      // Quality vs speed optimization
+      if (this.metrics.frameRate < this.profile.targetFPS * 0.9) {
+        this.optimizeFrameRate();
+      }
+
+      console.log('✅ Dynamic optimization completed');
+
+    } catch (error) {
+      console.error('❌ Dynamic optimization failed:', error);
+    } finally {
+      this.isOptimizing = false;
+    }
+  }
+
+  private async optimizeMemoryUsage(): Promise<void> {
+    // Trigger garbage collection if available
+    if (global.gc) {
+      global.gc();
+    }
+
+    // Reduce cache size
+    this.config.memoryManagement.cacheSize = Math.max(
+      this.config.memoryManagement.cacheSize * 0.7,
+      10
+    );
+
+    // Increase cleanup frequency
+    this.config.memoryManagement.tensorCleanupInterval = Math.max(
+      this.config.memoryManagement.tensorCleanupInterval * 0.8,
+      1000
+    );
+
+    console.log('🧹 Memory optimization applied');
+  }
+
+  private optimizeInferencePerformance(): void {
+    // Reduce input resolution
+    const [width, height] = this.config.inputResolution;
+    const newWidth = Math.max(width * 0.9, 256);
+    const newHeight = Math.max(height * 0.9, 256);
+    this.config.inputResolution = [newWidth, newHeight];
+
+    // Increase confidence threshold to reduce processing
+    this.config.confidenceThreshold = Math.min(
+      this.config.confidenceThreshold * 1.1,
+      0.9
+    );
+
+    // Reduce max detections
+    this.config.maxDetections = Math.max(
+      this.config.maxDetections - 1,
+      3
+    );
+
+    console.log('⚡ Inference performance optimization applied');
+  }
+
+  private optimizeFrameRate(): void {
+    // Increase frame skipping
+    this.config.frameSkipping = Math.min(
+      this.config.frameSkipping + 1,
+      5
+    );
+
+    // Disable expensive features if needed
+    if (this.config.frameSkipping >= 3 && this.config.enableEnsemble) {
+      this.config.enableEnsemble = false;
+      console.log('🔄 Disabled ensemble for better frame rate');
+    }
+
+    if (this.config.frameSkipping >= 4 && this.config.enableLLM) {
+      this.config.enableLLM = false;
+      console.log('🔄 Disabled LLM for better frame rate');
+    }
+
+    console.log('🎬 Frame rate optimization applied');
+  }
+
+  private handleMemoryPressure(usage: number): void {
+    console.warn(`⚠️ Memory pressure detected: ${usage}MB`);
+    
+    if (usage > this.config.memoryManagement.maxMemoryUsage) {
+      // Emergency memory cleanup
+      this.optimizeMemoryUsage();
+      
+      // Switch to battery saver mode if critical
+      if (usage > this.config.memoryManagement.maxMemoryUsage * 1.2) {
+        this.applyOptimizationProfile('battery-saver');
+        console.warn('🔋 Switched to battery saver mode due to memory pressure');
       }
     }
   }
 
-  private configureCacheStrategy(): void {
-    const strategy = this.currentSettings.cacheStrategy;
+  private handleNetworkChange(info: any): void {
+    console.log('🌐 Network change detected:', info);
     
-    // This would be implemented with actual cache management
-    diagnostic.logWarning(`Cache strategy set to: ${strategy}`, 'PerformanceOptimizer');
-  }
-
-  private implementFrameRateLimiting(): void {
-    const targetFrameTime = 1000 / this.currentSettings.maxFPS;
-    
-    // This would be implemented in the actual rendering loop
-    diagnostic.logWarning(`Frame rate limited to ${this.currentSettings.maxFPS}FPS`, 'PerformanceOptimizer');
-  }
-
-  private configureImageOptimization(): void {
-    const quality = this.currentSettings.imageQuality;
-    
-    // This would configure canvas context and image processing
-    diagnostic.logWarning(`Image quality set to ${(quality * 100).toFixed(0)}%`, 'PerformanceOptimizer');
-  }
-
-  private enableAggressivePreloading(): void {
-    // Preload critical resources
-    diagnostic.logWarning('Aggressive preloading enabled', 'PerformanceOptimizer');
-  }
-
-  private enableConservativePreloading(): void {
-    // Load resources on demand
-    diagnostic.logWarning('Conservative preloading enabled', 'PerformanceOptimizer');
-  }
-
-  private analyzePerformanceMetric(entry: PerformanceEntry): void {
-    // Analyze performance metrics and adjust settings if needed
-    if (entry.name === 'frame' && entry.duration > (1000 / this.currentSettings.maxFPS) * 2) {
-      this.adaptToPerformanceIssue('slow_frames');
+    if (info.effectiveType === 'slow-2g' || info.effectiveType === '2g') {
+      this.config.networkOptimization.modelLoadingStrategy = 'lazy';
+      this.config.networkOptimization.enableCompression = true;
+    } else if (info.effectiveType === '4g') {
+      this.config.networkOptimization.modelLoadingStrategy = 'eager';
     }
   }
 
-  private adaptToPerformanceIssue(issue: string): void {
-    switch (issue) {
-      case 'slow_frames':
-        if (this.currentSettings.maxFPS > 15) {
-          this.currentSettings.maxFPS = Math.max(15, this.currentSettings.maxFPS - 5);
-          this.recordOptimization('adaptation', `Reduced FPS to ${this.currentSettings.maxFPS}`);
-        }
-        break;
-      
-      case 'high_memory':
-        this.currentSettings.imageQuality = Math.max(0.5, this.currentSettings.imageQuality - 0.1);
-        this.recordOptimization('adaptation', `Reduced image quality to ${this.currentSettings.imageQuality}`);
-        break;
-    }
-  }
-
-  private recordOptimization(action: string, result: string): void {
-    this.optimizationHistory.push({
-      timestamp: Date.now(),
-      action,
-      result
-    });
+  private handleBatteryChange(info: any): void {
+    console.log('🔋 Battery change detected:', info);
     
-    // Keep only last 50 optimizations
-    if (this.optimizationHistory.length > 50) {
-      this.optimizationHistory = this.optimizationHistory.slice(-50);
+    if (info.level < 0.2 && !info.charging) {
+      // Low battery - switch to power saving
+      this.applyOptimizationProfile('battery-saver');
+      console.log('🔋 Switched to battery saver mode - low battery');
+    } else if (info.level > 0.8 && info.charging) {
+      // High battery and charging - can use full performance
+      const tier = this.determinePerformanceTier(this.profile.capabilities);
+      this.applyOptimizationProfile(tier);
+      console.log('🔋 Restored full performance - battery charging');
     }
   }
 
   // Public API
-  getCurrentSettings(): OptimizationSettings {
-    return { ...this.currentSettings };
+  getOptimizationConfig(): OptimizationConfig {
+    return { ...this.config };
   }
 
-  getDeviceProfile(): DeviceProfile {
-    return { ...this.deviceProfile };
+  getPerformanceProfile(): PerformanceProfile {
+    return { ...this.profile };
   }
 
-  updateSettings(newSettings: Partial<OptimizationSettings>): void {
-    this.currentSettings = { ...this.currentSettings, ...newSettings };
-    this.recordOptimization('manual_update', `Updated settings: ${JSON.stringify(newSettings)}`);
-    diagnostic.logWarning('Performance settings updated manually', 'PerformanceOptimizer');
+  getCurrentMetrics(): OptimizationMetrics {
+    return { ...this.metrics };
   }
 
-  getOptimizationHistory(): Array<{ timestamp: number; action: string; result: string }> {
-    return [...this.optimizationHistory];
+  updateMetrics(newMetrics: Partial<OptimizationMetrics>): void {
+    this.metrics = { ...this.metrics, ...newMetrics };
   }
 
-  generateOptimizationReport(): any {
-    return {
-      deviceProfile: this.deviceProfile,
-      currentSettings: this.currentSettings,
-      optimizationHistory: this.optimizationHistory.slice(-10),
-      recommendations: this.generateRecommendations(),
-      timestamp: new Date().toISOString()
-    };
+  forceOptimization(): Promise<void> {
+    return this.performDynamicOptimization();
   }
 
-  private generateRecommendations(): string[] {
-    const recommendations: string[] = [];
-    
-    if (this.deviceProfile.isLowEndDevice) {
-      recommendations.push('Consider closing other browser tabs to improve performance');
-      recommendations.push('Lower camera resolution may improve performance');
-    }
-    
-    if (this.deviceProfile.memory < 4) {
-      recommendations.push('Device has limited memory - some features may be slower');
-    }
-    
-    if (!this.currentSettings.enableWebGL) {
-      recommendations.push('WebGL is disabled - this may reduce AI inference performance');
-    }
-    
-    return recommendations;
+  resetToDefault(): void {
+    this.config = this.getDefaultConfig();
+    this.profile = this.getDefaultProfile();
+    console.log('🔄 Reset to default optimization settings');
+  }
+
+  dispose(): void {
+    this.memoryMonitor?.dispose();
+    this.networkMonitor?.dispose();
+    this.batteryMonitor?.dispose();
   }
 }
 
+// Helper classes for monitoring
+class MemoryMonitor {
+  onMemoryPressure?: (usage: number) => void;
+  private interval?: number;
+
+  constructor(private config: MemoryManagementConfig) {
+    if (browser) {
+      this.startMonitoring();
+    }
+  }
+
+  private startMonitoring(): void {
+    this.interval = window.setInterval(() => {
+      if ('memory' in performance) {
+        const memory = (performance as any).memory;
+        const usageMB = memory.usedJSHeapSize / (1024 * 1024);
+        
+        if (usageMB > this.config.gcTriggerThreshold && this.onMemoryPressure) {
+          this.onMemoryPressure(usageMB);
+        }
+      }
+    }, 1000);
+  }
+
+  dispose(): void {
+    if (this.interval) {
+      clearInterval(this.interval);
+    }
+  }
+}
+
+class NetworkMonitor {
+  onNetworkChange?: (info: any) => void;
+
+  constructor(private config: NetworkOptimizationConfig) {
+    if (browser && 'connection' in navigator) {
+      this.startMonitoring();
+    }
+  }
+
+  private startMonitoring(): void {
+    const connection = (navigator as any).connection;
+    if (connection) {
+      connection.addEventListener('change', () => {
+        if (this.onNetworkChange) {
+          this.onNetworkChange({
+            effectiveType: connection.effectiveType,
+            downlink: connection.downlink,
+            rtt: connection.rtt
+          });
+        }
+      });
+    }
+  }
+
+  dispose(): void {
+    // Network monitoring cleanup if needed
+  }
+}
+
+class BatteryMonitor {
+  onBatteryChange?: (info: any) => void;
+  private battery?: any;
+
+  constructor() {
+    if (browser && 'getBattery' in navigator) {
+      this.initializeBatteryMonitoring();
+    }
+  }
+
+  private async initializeBatteryMonitoring(): Promise<void> {
+    try {
+      this.battery = await (navigator as any).getBattery();
+      
+      const updateBattery = () => {
+        if (this.onBatteryChange) {
+          this.onBatteryChange({
+            level: this.battery.level,
+            charging: this.battery.charging,
+            dischargingTime: this.battery.dischargingTime
+          });
+        }
+      };
+
+      this.battery.addEventListener('levelchange', updateBattery);
+      this.battery.addEventListener('chargingchange', updateBattery);
+    } catch (error) {
+      console.warn('Battery API not available:', error);
+    }
+  }
+
+  dispose(): void {
+    // Battery monitoring cleanup if needed
+  }
+}
+
+// Global performance optimizer instance
 export const performanceOptimizer = new PerformanceOptimizer(); 
