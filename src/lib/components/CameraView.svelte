@@ -255,6 +255,11 @@
   } else if (!isActive) {
     stopCamera();
   }
+  
+  // Function to activate camera
+  function activateCamera() {
+    isActive = true;
+  }
 </script>
 
 <div class="camera-container">
@@ -289,7 +294,7 @@
       </div>
     </div>
   {:else}
-    <div class="camera-placeholder">
+    <div class="camera-placeholder" on:click={activateCamera} role="button" tabindex="0" aria-label="Start camera detection">
       <div class="placeholder-content">
         <div class="camera-icon">📹</div>
         <h3>Camera Ready</h3>
@@ -375,6 +380,17 @@
     justify-content: center;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .camera-placeholder:hover {
+    background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+    transform: scale(1.02);
+  }
+  
+  .camera-placeholder:active {
+    transform: scale(0.98);
   }
   
   .placeholder-content {
@@ -384,6 +400,12 @@
   .camera-icon {
     font-size: 64px;
     margin-bottom: 16px;
+    animation: pulse 2s infinite;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
   }
   
   .placeholder-content h3 {
