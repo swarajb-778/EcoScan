@@ -318,10 +318,10 @@ class TestingFramework {
   private config: TestConfig;
   private suites: Map<string, TestSuite> = new Map();
   private tests: Map<string, TestCase> = new Map();
-  private results: Map<string, TestResult> = new Map();
+  private testResults: Map<string, TestResult> = new Map();
   private mocks: Map<string, Mock> = new Map();
   private fixtures: Map<string, Fixture> = new Map();
-  private session: TestSession | null = null;
+  private currentSession: TestSession | null = null;
   private running = false;
   private coverage: Coverage | null = null;
   private performance: PerformanceMetrics | null = null;
@@ -762,7 +762,7 @@ class TestingFramework {
   public addAssertion(assertion: Assertion): void {
     this.assertionCount++;
     if (this.currentTest) {
-      const result = this.results.get(this.currentTest.id);
+      const result = this.testResults.get(this.currentTest.id);
       if (result) {
         result.assertions.push(assertion);
       }
@@ -889,7 +889,7 @@ class TestingFramework {
       environment: this.getTestEnvironment()
     };
 
-    this.session = session;
+    this.currentSession = session;
     this._session.set(session);
 
     try {
@@ -955,7 +955,7 @@ class TestingFramework {
       metadata: {}
     };
 
-    this.results.set(result.id, result);
+    this.testResults.set(result.id, result);
     this.updateResults();
 
     try {
@@ -1038,11 +1038,11 @@ class TestingFramework {
   }
 
   private hasFailed(): boolean {
-    return Array.from(this.results.values()).some(result => result.status === 'failed');
+    return Array.from(this.testResults.values()).some(result => result.status === 'failed');
   }
 
   private calculateSummary(): TestSummary {
-    const results = Array.from(this.results.values());
+    const results = Array.from(this.testResults.values());
     const total = results.length;
     const passed = results.filter(r => r.status === 'passed').length;
     const failed = results.filter(r => r.status === 'failed').length;
@@ -1083,8 +1083,8 @@ class TestingFramework {
 
   private generateJSONReport(): void {
     const report = {
-      session: this.session,
-      results: Array.from(this.results.values()),
+      session: this.currentSession,
+      results: Array.from(this.testResults.values()),
       summary: this.calculateSummary(),
       coverage: this.coverage,
       performance: this.performance
@@ -1253,7 +1253,7 @@ class TestingFramework {
   }
 
   private updateResults(): void {
-    this._results.set(Array.from(this.results.values()));
+    this._results.set(Array.from(this.testResults.values()));
     this._summary.set(this.calculateSummary());
   }
 
@@ -1263,7 +1263,7 @@ class TestingFramework {
 
   // Public API
   public getResults(): TestResult[] {
-    return Array.from(this.results.values());
+    return Array.from(this.testResults.values());
   }
 
   public getSummary(): TestSummary {
@@ -1289,7 +1289,7 @@ class TestingFramework {
     }
 
     await this.executeTest(test);
-    return this.results.get(testId)!;
+    return this.testResults.get(testId)!;
   }
 
   public async runSuite(suiteId: string): Promise<TestResult[]> {
@@ -1301,7 +1301,7 @@ class TestingFramework {
     const results: TestResult[] = [];
     for (const test of suite.tests) {
       await this.executeTest(test);
-      const result = this.results.get(test.id);
+      const result = this.testResults.get(test.id);
       if (result) {
         results.push(result);
       }
@@ -1311,7 +1311,7 @@ class TestingFramework {
   }
 
   public clearResults(): void {
-    this.results.clear();
+    this.testResults.clear();
     this.updateResults();
   }
 
