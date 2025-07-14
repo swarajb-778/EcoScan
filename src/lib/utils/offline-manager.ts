@@ -157,7 +157,7 @@ class OfflineManager {
   private syncQueue: SyncQueue[] = [];
   private activeRequests: Map<string, Promise<any>> = new Map();
   private networkStatus: OfflineStatus;
-  private metrics: OfflineMetrics;
+  private metricsData: OfflineMetrics;
   private syncInterval: number | null = null;
   private cleanupInterval: number | null = null;
   private prefetchQueue: string[] = [];
@@ -181,7 +181,7 @@ class OfflineManager {
   constructor() {
     this.config = this.getOfflineConfig();
     this.networkStatus = this.getInitialStatus();
-    this.metrics = this.getInitialMetrics();
+    this.metricsData = this.getInitialMetrics();
     this.initializeOfflineSystem();
   }
 
@@ -446,15 +446,15 @@ class OfflineManager {
       
       switch (type) {
         case 'CACHE_HIT':
-          this.metrics.cacheHits++;
-          this.metrics.bytesSaved += data.size;
+          this.metricsData.cacheHits++;
+          this.metricsData.bytesSaved += data.size;
           break;
         case 'CACHE_MISS':
-          this.metrics.cacheMisses++;
+          this.metricsData.cacheMisses++;
           break;
         case 'NETWORK_REQUEST':
-          this.metrics.networkRequests++;
-          this.metrics.bytesTransferred += data.size;
+          this.metricsData.networkRequests++;
+          this.metricsData.bytesTransferred += data.size;
           break;
         case 'SYNC_COMPLETED':
           this.handleSyncCompleted(data);
@@ -581,7 +581,7 @@ class OfflineManager {
   }
 
   public async get(key: string, policy: CachePolicy = 'cache-first'): Promise<any> {
-    this.metrics.totalRequests++;
+    this.metricsData.totalRequests++;
     const startTime = Date.now();
 
     try {
@@ -615,7 +615,7 @@ class OfflineManager {
   private async getCacheFirst(key: string): Promise<any> {
     const cached = this.getFromCache(key);
     if (cached) {
-      this.metrics.cacheHits++;
+      this.metricsData.cacheHits++;
       return cached.data;
     }
 
@@ -625,11 +625,11 @@ class OfflineManager {
         this.setCache(key, data);
         return data;
       } catch (error) {
-        this.metrics.cacheMisses++;
+        this.metricsData.cacheMisses++;
         throw error;
       }
     } else {
-      this.metrics.cacheMisses++;
+      this.metricsData.cacheMisses++;
       throw new Error('No cached data available offline');
     }
   }
@@ -643,7 +643,7 @@ class OfflineManager {
       } catch (error) {
         const cached = this.getFromCache(key);
         if (cached) {
-          this.metrics.cacheHits++;
+          this.metricsData.cacheHits++;
           return cached.data;
         }
         throw error;
@@ -651,7 +651,7 @@ class OfflineManager {
     } else {
       const cached = this.getFromCache(key);
       if (cached) {
-        this.metrics.cacheHits++;
+        this.metricsData.cacheHits++;
         return cached.data;
       }
       throw new Error('No cached data available offline');
@@ -662,7 +662,7 @@ class OfflineManager {
     const cached = this.getFromCache(key);
     
     if (cached) {
-      this.metrics.cacheHits++;
+      this.metricsData.cacheHits++;
       
       // Return cached data immediately
       const result = cached.data;
@@ -684,7 +684,7 @@ class OfflineManager {
       this.setCache(key, data);
       return data;
     } else {
-      this.metrics.cacheMisses++;
+      this.metricsData.cacheMisses++;
       throw new Error('No cached data available offline');
     }
   }
@@ -700,11 +700,11 @@ class OfflineManager {
   private async getCacheOnly(key: string): Promise<any> {
     const cached = this.getFromCache(key);
     if (cached) {
-      this.metrics.cacheHits++;
+      this.metricsData.cacheHits++;
       return cached.data;
     }
     
-    this.metrics.cacheMisses++;
+    this.metricsData.cacheMisses++;
     throw new Error('No cached data available');
   }
 
@@ -773,8 +773,8 @@ class OfflineManager {
       const data = await response.json();
       const endTime = Date.now();
       
-      this.metrics.networkRequests++;
-      this.metrics.bytesTransferred += JSON.stringify(data).length;
+      this.metricsData.networkRequests++;
+      this.metricsData.bytesTransferred += JSON.stringify(data).length;
       
       return data;
     } catch (error) {
@@ -860,7 +860,7 @@ class OfflineManager {
       entry.data = compressed;
       entry.size = size;
       entry.metadata.compressed = true;
-      this.metrics.bytesSaved += entry.size - size;
+      this.metricsData.bytesSaved += entry.size - size;
     }
   }
 
@@ -956,12 +956,12 @@ class OfflineManager {
         item.status = 'processing';
         await this.processSyncItem(item);
         item.status = 'completed';
-        this.metrics.syncOperations++;
+        this.metricsData.syncOperations++;
       } catch (error) {
         item.status = 'failed';
         item.error = error instanceof Error ? error.message : 'Unknown error';
         item.retryCount++;
-        this.metrics.syncFailures++;
+        this.metricsData.syncFailures++;
 
         if (item.retryCount < item.maxRetries) {
           item.status = 'pending';
@@ -1200,13 +1200,13 @@ class OfflineManager {
   }
 
   private handleSyncCompleted(data: any): void {
-    this.metrics.syncOperations++;
-    this.metrics.lastSync = Date.now();
+    this.metricsData.syncOperations++;
+    this.metricsData.lastSync = Date.now();
     this.updateMetrics();
   }
 
   private handleSyncFailed(data: any): void {
-    this.metrics.syncFailures++;
+    this.metricsData.syncFailures++;
     this.updateMetrics();
   }
 
@@ -1218,9 +1218,9 @@ class OfflineManager {
   }
 
   private updateMetrics(): void {
-    this.metrics.syncQueue = this.syncQueue;
-    this.metrics.cacheEntries = Array.from(this.memoryCache.values());
-    this.metrics.performanceScore = this.calculatePerformanceScore();
+    this.metricsData.syncQueue = this.syncQueue;
+    this.metricsData.cacheEntries = Array.from(this.memoryCache.values());
+    this.metricsData.performanceScore = this.calculatePerformanceScore();
     this._metrics.set(this.metrics);
   }
 
@@ -1238,21 +1238,21 @@ class OfflineManager {
   }
 
   private calculateCacheHitRate(): number {
-    const total = this.metrics.cacheHits + this.metrics.cacheMisses;
-    return total > 0 ? (this.metrics.cacheHits / total) * 100 : 0;
+    const total = this.metricsData.cacheHits + this.metricsData.cacheMisses;
+    return total > 0 ? (this.metricsData.cacheHits / total) * 100 : 0;
   }
 
   private calculatePerformanceScore(): number {
     const cacheHitRate = this.calculateCacheHitRate();
-    const syncSuccessRate = this.metrics.syncOperations > 0 ? 
-      ((this.metrics.syncOperations - this.metrics.syncFailures) / this.metrics.syncOperations) * 100 : 100;
+    const syncSuccessRate = this.metricsData.syncOperations > 0 ? 
+      ((this.metricsData.syncOperations - this.metricsData.syncFailures) / this.metricsData.syncOperations) * 100 : 100;
     
     return Math.round((cacheHitRate + syncSuccessRate) / 2);
   }
 
   private updateAverageResponseTime(responseTime: number): void {
-    const totalRequests = this.metrics.totalRequests;
-    this.metrics.avgResponseTime = ((this.metrics.avgResponseTime * (totalRequests - 1)) + responseTime) / totalRequests;
+    const totalRequests = this.metricsData.totalRequests;
+    this.metricsData.avgResponseTime = ((this.metricsData.avgResponseTime * (totalRequests - 1)) + responseTime) / totalRequests;
   }
 
   // Public API
@@ -1269,7 +1269,7 @@ class OfflineManager {
   }
 
   public getMetrics(): OfflineMetrics {
-    return { ...this.metrics };
+    return { ...this.metricsData };
   }
 
   public getSyncQueue(): SyncQueue[] {
