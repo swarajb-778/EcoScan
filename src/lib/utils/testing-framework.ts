@@ -1523,4 +1523,48 @@ export function beforeAll(fn: () => Promise<void> | void): void {
 
 export function afterAll(fn: () => Promise<void> | void): void {
   testingFramework.afterAll(fn);
+}
+
+// Mock data utilities for testing
+export function getMockImageData(width: number = 640, height: number = 640): ImageData {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  
+  // Fill with sample test pattern
+  ctx.fillStyle = '#333333';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(50, 50, 100, 100);
+  ctx.fillStyle = '#ff0000';
+  ctx.fillRect(200, 200, 80, 80);
+  
+  return ctx.getImageData(0, 0, width, height);
+}
+
+export function getMockDetections(): any[] {
+  return [
+    {
+      bbox: [50, 50, 100, 100],
+      class: 'bottle',
+      confidence: 0.85,
+      category: 'recycle'
+    },
+    {
+      bbox: [200, 200, 80, 80],
+      class: 'apple',
+      confidence: 0.92,
+      category: 'compost'
+    }
+  ];
+}
+
+export function createMockVideo(): HTMLVideoElement {
+  const video = document.createElement('video');
+  video.width = 640;
+  video.height = 640;
+  video.currentTime = 0;
+  video.readyState = 4; // HAVE_ENOUGH_DATA
+  return video;
 } 
