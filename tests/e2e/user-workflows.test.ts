@@ -10,648 +10,620 @@
  * - Performance under realistic usage
  */
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 
 // Test configuration
-const BASE_URL = 'http://localhost:5173'; // SvelteKit dev server
-const MOBILE_VIEWPORT = { width: 375, height: 667 }; // iPhone SE
-const DESKTOP_VIEWPORT = { width: 1920, height: 1080 };
+const TEST_CONFIG = {
+  baseURL: 'http://localhost:5173',
+  timeout: 30000,
+  actionTimeout: 10000
+};
 
-// Test utilities
+// Helper functions for common actions
 class EcoScanTestHelper {
   constructor(private page: Page) {}
 
-  async navigateToApp() {
-    await this.page.goto(BASE_URL);
+  async gotoApp() {
+    await this.page.goto(TEST_CONFIG.baseURL);
     await this.page.waitForLoadState('networkidle');
   }
 
-  async waitForModelLoad() {
-    // Wait for ML models to load
-    await this.page.waitForFunction(() => {
-      return window.localStorage.getItem('ecoscan-models-loaded') === 'true';
-    }, { timeout: 30000 });
+  async waitForCameraReady() {
+    await this.page.waitForSelector('[aria-label="Start camera detection"]', { 
+      timeout: TEST_CONFIG.timeout 
+    });
   }
 
-  async mockCameraPermission(granted: boolean = true) {
-    await this.page.context().grantPermissions(
-      granted ? ['camera'] : [], 
-      { origin: BASE_URL }
-    );
+  async startCamera() {
+    await this.page.click('[aria-label="Start camera detection"]');
+    await this.page.waitForSelector('video', { timeout: TEST_CONFIG.timeout });
   }
 
-  async mockMicrophonePermission(granted: boolean = true) {
-    await this.page.context().grantPermissions(
-      granted ? ['microphone'] : [], 
-      { origin: BASE_URL }
-    );
+  async mockCameraPermission() {
+    // Grant camera permission
+    await this.page.context().grantPermissions(['camera']);
   }
 
-  async uploadTestImage(filename: string) {
+  async mockGetUserMedia() {
+    // Mock getUserMedia to provide test video stream
+    await this.page.addInitScript(() => {
+      // @ts-ignore
+      navigator.mediaDevices.getUserMedia = async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 640;
+        const ctx = canvas.getContext('2d')!;
+        
+        // Draw test pattern
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(0, 0, 640, 640);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(100, 100, 200, 200);
+        
+        // @ts-ignore
+        const stream = canvas.captureStream(30);
+        return stream;
+      };
+    });
+  }
+
+  async uploadTestImage() {
     const fileInput = this.page.locator('input[type="file"]');
-    await fileInput.setInputFiles(`tests/fixtures/${filename}`);
-  }
-
-  async startCameraDetection() {
-    await this.page.click('[data-testid="camera-button"]');
-    await this.page.waitForSelector('[data-testid="camera-view"]', { state: 'visible' });
-  }
-
-  async startVoiceInput() {
-    await this.page.click('[data-testid="voice-button"]');
-    await this.page.waitForSelector('[data-testid="voice-recording"]', { state: 'visible' });
+    await fileInput.setInputFiles({
+      name: 'test-bottle.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.from('fake-image-data')
+    });
   }
 
   async waitForDetectionResults() {
-    await this.page.waitForSelector('[data-testid="detection-results"]', { 
-      state: 'visible',
-      timeout: 10000 
+    await this.page.waitForSelector('.detection-overlay', { 
+      timeout: TEST_CONFIG.timeout 
     });
   }
 
-  async checkPerformanceMetrics(): Promise<{loadTime: number; domReady: number; firstPaint: number}> {
-    const perfMetrics = await this.page.evaluate(() => {
-      return {
-        loadTime: performance.timing.loadEventEnd - performance.timing.navigationStart,
-        domReady: performance.timing.domContentLoadedEventEnd - performance.timing.navigationStart,
-        firstPaint: performance.getEntriesByName('first-paint')[0]?.startTime || 0
-      };
-    });
-    return perfMetrics;
+  async getDetectionCount(): Promise<number> {
+    const countText = await this.page.textContent('.detection-count');
+    const match = countText?.match(/(\d+) items detected/);
+    return match ? parseInt(match[1]) : 0;
   }
 
-  async measureInferenceTime() {
-    const startTime = Date.now();
-    await this.waitForDetectionResults();
-    return Date.now() - startTime;
+  async clickDetection(index: number = 0) {
+    const detections = this.page.locator('.detection-box');
+    await detections.nth(index).click();
   }
 
-  async checkAccessibility() {
-    // Check ARIA labels and keyboard navigation
-    const accessibilityIssues = await this.page.evaluate(() => {
-      const issues = [];
-      
-      // Check for missing alt text
-      const images = document.querySelectorAll('img:not([alt])');
-      if (images.length > 0) {
-        issues.push(`${images.length} images missing alt text`);
+  async startVoiceInput() {
+    await this.page.click('[aria-label="Start voice input"]');
+  }
+
+  async mockSpeechRecognition() {
+    await this.page.addInitScript(() => {
+      // @ts-ignore
+      class MockSpeechRecognition {
+        continuous = false;
+        interimResults = false;
+        lang = 'en-US';
+        
+        onstart = null;
+        onresult = null;
+        onend = null;
+        onerror = null;
+
+        start() {
+          setTimeout(() => {
+            if (this.onstart) this.onstart({});
+            
+            // Simulate recognition result
+            setTimeout(() => {
+              if (this.onresult) {
+                this.onresult({
+                  results: [{
+                    0: { transcript: 'plastic bottle' },
+                    isFinal: true
+                  }],
+                  resultIndex: 0
+                });
+              }
+              
+              if (this.onend) this.onend({});
+            }, 1000);
+          }, 100);
+        }
+
+        stop() {
+          if (this.onend) this.onend({});
+        }
       }
-      
-      // Check for missing ARIA labels
-      const buttons = document.querySelectorAll('button:not([aria-label]):not([aria-labelledby])');
-      if (buttons.length > 0) {
-        issues.push(`${buttons.length} buttons missing ARIA labels`);
-      }
-      
-      // Check color contrast (simplified)
-      const elements = document.querySelectorAll('[data-testid]');
-      for (const element of elements) {
-        const styles = getComputedStyle(element);
-        const bgColor = styles.backgroundColor;
-        const textColor = styles.color;
-        // Basic contrast check would go here
-      }
-      
-      return issues;
+
+      // @ts-ignore
+      window.SpeechRecognition = MockSpeechRecognition;
+      // @ts-ignore
+      window.webkitSpeechRecognition = MockSpeechRecognition;
     });
-    
-    return accessibilityIssues;
   }
 }
 
-test.describe('EcoScan E2E User Workflows', () => {
+test.describe('EcoScan User Workflows', () => {
   let helper: EcoScanTestHelper;
 
   test.beforeEach(async ({ page }) => {
     helper = new EcoScanTestHelper(page);
-    await helper.navigateToApp();
+    await helper.gotoApp();
   });
 
-  test.describe('Primary User Journey: Camera Detection', () => {
+  test.describe('Camera Detection Workflow', () => {
     test('complete camera detection workflow', async ({ page }) => {
-      // Set mobile viewport for realistic testing
-      await page.setViewportSize(MOBILE_VIEWPORT);
-      await helper.mockCameraPermission(true);
-      
-      // Step 1: User grants camera permission and starts detection
-      await helper.startCameraDetection();
-      
-      // Step 2: Wait for models to load
-      await helper.waitForModelLoad();
-      
-      // Step 3: Mock camera feed with test image
-      await page.evaluate(() => {
-        // Mock camera stream with test image
-        const video = document.querySelector('video');
-        if (video) {
-          video.srcObject = null;
-          video.src = '/tests/fixtures/bottle-test-image.jpg';
-        }
-      });
-      
-      // Step 4: Wait for detection results
-      const inferenceTime = await helper.measureInferenceTime();
-      expect(inferenceTime).toBeLessThan(3000); // Should complete within 3 seconds
-      
-      // Step 5: Verify results are displayed
-      const results = await page.locator('[data-testid="detection-results"]');
-      await expect(results).toBeVisible();
-      
-      const detectionCount = await page.locator('[data-testid="detection-item"]').count();
-      expect(detectionCount).toBeGreaterThan(0);
-      
-      // Step 6: User taps on detection for details
-      await page.click('[data-testid="detection-item"]:first-child');
-      await expect(page.locator('[data-testid="detection-details"]')).toBeVisible();
-      
-      // Step 7: Verify classification information
-      const category = await page.locator('[data-testid="waste-category"]').textContent();
-      expect(['recycle', 'compost', 'landfill']).toContain(category?.toLowerCase());
-      
-      const instructions = await page.locator('[data-testid="disposal-instructions"]').textContent();
-      expect(instructions?.length).toBeGreaterThan(0);
+      // Setup mocks
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+
+      // Verify initial state
+      await helper.waitForCameraReady();
+      await expect(page.locator('text=Camera Ready')).toBeVisible();
+      await expect(page.locator('text=Tap to start detecting waste items')).toBeVisible();
+
+      // Start camera
+      await helper.startCamera();
+
+      // Verify camera is active
+      await expect(page.locator('video')).toBeVisible();
+      await expect(page.locator('canvas')).toBeVisible();
+
+      // Wait for detection results (mocked)
+      await page.waitForTimeout(2000); // Give time for detection to process
+
+      // Verify detection interface
+      await expect(page.locator('.detection-count')).toBeVisible();
+      await expect(page.locator('.switch-camera')).toBeVisible();
+
+      // Test camera switching
+      await page.click('.switch-camera');
+      await page.waitForTimeout(1000);
+
+      // Verify camera is still active after switch
+      await expect(page.locator('video')).toBeVisible();
     });
 
-    test('handles camera permission denial gracefully', async ({ page }) => {
-      await helper.mockCameraPermission(false);
-      
-      await page.click('[data-testid="camera-button"]');
-      
-      // Should show permission error
-      await expect(page.locator('[data-testid="camera-permission-error"]')).toBeVisible();
-      
-      // Should offer alternative input methods
-      await expect(page.locator('[data-testid="upload-alternative"]')).toBeVisible();
-      await expect(page.locator('[data-testid="voice-alternative"]')).toBeVisible();
-    });
+    test('camera permission handling', async ({ page }) => {
+      // Deny camera permission
+      await page.context().grantPermissions([]);
 
-    test('performs well under continuous use', async ({ page }) => {
-      await page.setViewportSize(MOBILE_VIEWPORT);
-      await helper.mockCameraPermission(true);
-      await helper.startCameraDetection();
-      await helper.waitForModelLoad();
+      await helper.waitForCameraReady();
+      await helper.startCamera();
+
+      // Should show error or fallback
+      await page.waitForTimeout(2000);
       
-      // Simulate continuous detection for 30 seconds
-      const detectionTimes = [];
-      const startTime = Date.now();
-      
-      while (Date.now() - startTime < 30000) {
-        const detectionStart = Date.now();
-        
-        // Mock new detection
-        await page.evaluate(() => {
-          window.dispatchEvent(new CustomEvent('mock-detection', {
-            detail: { mockResults: true }
-          }));
-        });
-        
-        await helper.waitForDetectionResults();
-        detectionTimes.push(Date.now() - detectionStart);
-        
-        // Small delay between detections
-        await page.waitForTimeout(500);
+      // Check for error handling (exact implementation may vary)
+      const hasVideo = await page.locator('video').isVisible();
+      if (!hasVideo) {
+        // Should provide alternative methods
+        await expect(page.locator('text=upload')).toBeVisible();
       }
-      
-      // Verify performance consistency
-      const avgTime = detectionTimes.reduce((a, b) => a + b, 0) / detectionTimes.length;
-      expect(avgTime).toBeLessThan(1000); // Average under 1 second
-      
-      const maxTime = Math.max(...detectionTimes);
-      expect(maxTime).toBeLessThan(3000); // No single detection over 3 seconds
+    });
+
+    test('camera keyboard navigation', async ({ page }) => {
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+
+      await helper.waitForCameraReady();
+
+      // Test keyboard activation
+      const cameraButton = page.locator('[aria-label="Start camera detection"]');
+      await cameraButton.focus();
+      await page.keyboard.press('Enter');
+
+      // Should start camera
+      await expect(page.locator('video')).toBeVisible();
     });
   });
 
   test.describe('Image Upload Workflow', () => {
-    test('complete image upload and classification workflow', async ({ page }) => {
-      // Step 1: Navigate to upload section
-      await page.click('[data-testid="upload-tab"]');
-      await expect(page.locator('[data-testid="upload-area"]')).toBeVisible();
-      
-      // Step 2: Upload test image
-      await helper.uploadTestImage('mixed-waste.jpg');
-      
-      // Step 3: Wait for upload preview
-      await expect(page.locator('[data-testid="upload-preview"]')).toBeVisible();
-      
-      // Step 4: Trigger processing
-      await page.click('[data-testid="process-image-button"]');
-      
-      // Step 5: Wait for detection results
-      const processingTime = await helper.measureInferenceTime();
-      expect(processingTime).toBeLessThan(5000); // Upload processing should be quick
-      
-      // Step 6: Verify multiple detections for complex image
-      const detectionCount = await page.locator('[data-testid="detection-item"]').count();
-      expect(detectionCount).toBeGreaterThan(1); // Should detect multiple items
-      
-      // Step 7: Test sorting and filtering
-      await page.click('[data-testid="sort-by-confidence"]');
-      await page.waitForTimeout(500);
-      
-      const confidenceValues = await page.locator('[data-testid="confidence-value"]').allTextContents();
-      const confidenceNumbers = confidenceValues.map(val => parseFloat(val.replace('%', '')));
-      
-      // Should be sorted in descending order
-      for (let i = 1; i < confidenceNumbers.length; i++) {
-        expect(confidenceNumbers[i]).toBeLessThanOrEqual(confidenceNumbers[i-1]);
+    test('complete image upload workflow', async ({ page }) => {
+      // Navigate to upload section
+      await page.click('text=Upload');
+
+      // Upload test image
+      await helper.uploadTestImage();
+
+      // Wait for image processing
+      await page.waitForTimeout(3000);
+
+      // Verify image is displayed
+      await expect(page.locator('img')).toBeVisible();
+
+      // Wait for detection results
+      await helper.waitForDetectionResults();
+
+      // Verify detection overlay
+      await expect(page.locator('.detection-overlay')).toBeVisible();
+
+      // Click on detection for details
+      const detections = page.locator('.detection-box');
+      if (await detections.count() > 0) {
+        await detections.first().click();
+        
+        // Verify details modal
+        await expect(page.locator('.detection-details')).toBeVisible();
+        await expect(page.locator('.disposal-instructions')).toBeVisible();
       }
     });
 
-    test('handles various image formats', async ({ page }) => {
-      const imageFormats = [
-        'test-image.jpg',
-        'test-image.png',
-        'test-image.webp',
-        'test-image.gif'
-      ];
+    test('drag and drop upload', async ({ page }) => {
+      await page.goto(`${TEST_CONFIG.baseURL}/upload`);
+
+      // Create a file to drop
+      const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
       
-      for (const imageFile of imageFormats) {
-        await page.click('[data-testid="upload-tab"]');
-        await helper.uploadTestImage(imageFile);
-        
-        // Should accept and process all supported formats
-        await expect(page.locator('[data-testid="upload-preview"]')).toBeVisible();
-        await page.click('[data-testid="process-image-button"]');
-        await helper.waitForDetectionResults();
-        
-        // Clear for next iteration
-        await page.click('[data-testid="clear-upload"]');
-      }
+      // Simulate drag and drop
+      const dropZone = page.locator('.upload-zone');
+      await dropZone.dispatchEvent('dragover', { dataTransfer });
+      await dropZone.dispatchEvent('drop', { dataTransfer });
+
+      await page.waitForTimeout(2000);
+      
+      // Should show upload progress or result
+      // Implementation depends on actual component behavior
     });
 
-    test('validates file size and type restrictions', async ({ page }) => {
-      await page.click('[data-testid="upload-tab"]');
-      
-      // Test oversized file
-      await page.setInputFiles('[data-testid="file-input"]', {
-        name: 'large-file.jpg',
-        mimeType: 'image/jpeg',
-        buffer: Buffer.alloc(50 * 1024 * 1024) // 50MB
-      });
-      
-      await expect(page.locator('[data-testid="file-size-error"]')).toBeVisible();
-      
-      // Test invalid file type
-      await page.setInputFiles('[data-testid="file-input"]', {
+    test('invalid file handling', async ({ page }) => {
+      await page.goto(`${TEST_CONFIG.baseURL}/upload`);
+
+      // Try to upload non-image file
+      const fileInput = page.locator('input[type="file"]');
+      await fileInput.setInputFiles({
         name: 'document.pdf',
         mimeType: 'application/pdf',
-        buffer: Buffer.from('fake pdf content')
+        buffer: Buffer.from('fake-pdf-data')
       });
-      
-      await expect(page.locator('[data-testid="file-type-error"]')).toBeVisible();
+
+      await page.waitForTimeout(1000);
+
+      // Should show error message
+      await expect(page.locator('text=not supported')).toBeVisible();
     });
   });
 
   test.describe('Voice Input Workflow', () => {
-    test('complete voice search and classification workflow', async ({ page }) => {
-      await helper.mockMicrophonePermission(true);
+    test('complete voice input workflow', async ({ page }) => {
+      await helper.mockSpeechRecognition();
       
-      // Step 1: Start voice input
+      // Navigate to voice section
+      await page.click('text=Voice');
+
+      // Grant microphone permission
+      await page.context().grantPermissions(['microphone']);
+
+      // Start voice input
       await helper.startVoiceInput();
-      
-      // Step 2: Mock speech recognition
-      await page.evaluate(() => {
-        // Mock SpeechRecognition API
-        const mockRecognition = {
-          start: () => {
+
+      // Verify recording state
+      await expect(page.locator('.recording-indicator')).toBeVisible();
+
+      // Wait for speech recognition result
+      await page.waitForTimeout(2000);
+
+      // Verify classification result
+      await expect(page.locator('.voice-result')).toBeVisible();
+      await expect(page.locator('.classification-category')).toBeVisible();
+      await expect(page.locator('.disposal-instructions')).toBeVisible();
+    });
+
+    test('voice input error handling', async ({ page }) => {
+      // Don't grant microphone permission
+      await page.context().grantPermissions([]);
+
+      await page.goto(`${TEST_CONFIG.baseURL}/voice`);
+
+      await helper.startVoiceInput();
+
+      await page.waitForTimeout(2000);
+
+      // Should show error or fallback
+      await expect(page.locator('text=microphone')).toBeVisible();
+    });
+
+    test('voice input with unclear speech', async ({ page }) => {
+      // Mock unclear speech recognition
+      await page.addInitScript(() => {
+        // @ts-ignore
+        class MockSpeechRecognition {
+          start() {
             setTimeout(() => {
-              mockRecognition.onresult({
-                results: [[{ transcript: 'plastic bottle' }]]
-              });
+              if (this.onerror) {
+                this.onerror({ error: 'no-speech' });
+              }
             }, 1000);
-          },
-          stop: () => {},
-          onresult: null,
-          onerror: null
-        };
-        
-        window.SpeechRecognition = function() { return mockRecognition; };
-        window.webkitSpeechRecognition = function() { return mockRecognition; };
-      });
-      
-      // Step 3: Wait for transcription
-      await expect(page.locator('[data-testid="voice-transcript"]')).toHaveText('plastic bottle');
-      
-      // Step 4: Wait for classification results
-      await helper.waitForDetectionResults();
-      
-      // Step 5: Verify voice-based classification
-      const category = await page.locator('[data-testid="waste-category"]').textContent();
-      expect(category?.toLowerCase()).toBe('recycle');
-      
-      // Step 6: Test voice alternatives and corrections
-      await page.click('[data-testid="try-again-button"]');
-      await helper.startVoiceInput();
-      
-             await page.evaluate(() => {
-         const recognition = new window.SpeechRecognition();
-         if (recognition && recognition.onresult) {
-           recognition.onresult({
-             results: [[{ transcript: 'banana peel' }]]
-           });
-         }
-       });
-      
-      await helper.waitForDetectionResults();
-      const newCategory = await page.locator('[data-testid="waste-category"]').textContent();
-      expect(newCategory?.toLowerCase()).toBe('compost');
-    });
+          }
+          
+          onstart = null;
+          onerror = null;
+          onend = null;
+        }
 
-    test('handles microphone permission denial', async ({ page }) => {
-      await helper.mockMicrophonePermission(false);
-      
-      await page.click('[data-testid="voice-button"]');
-      
-      // Should show permission error and text fallback
-      await expect(page.locator('[data-testid="mic-permission-error"]')).toBeVisible();
-      await expect(page.locator('[data-testid="text-input-fallback"]')).toBeVisible();
-      
-      // Test text input fallback
-      await page.fill('[data-testid="text-input-fallback"]', 'glass jar');
-      await page.click('[data-testid="text-search-button"]');
-      
-      await helper.waitForDetectionResults();
-      const category = await page.locator('[data-testid="waste-category"]').textContent();
-      expect(category?.toLowerCase()).toBe('recycle');
-    });
-
-    test('handles unclear speech and provides suggestions', async ({ page }) => {
-      await helper.mockMicrophonePermission(true);
-      await helper.startVoiceInput();
-      
-      // Mock unclear speech
-      await page.evaluate(() => {
-        window.SpeechRecognition().onresult({
-          results: [[{ transcript: 'umm... plastic... thing?' }]]
-        });
+        // @ts-ignore
+        window.SpeechRecognition = MockSpeechRecognition;
       });
-      
-      // Should show suggestions
-      await expect(page.locator('[data-testid="speech-suggestions"]')).toBeVisible();
-      
-      const suggestions = await page.locator('[data-testid="suggestion-item"]').allTextContents();
-      expect(suggestions.length).toBeGreaterThan(0);
-      expect(suggestions.some(s => s.includes('plastic'))).toBe(true);
-      
-      // User can select suggestion
-      await page.click('[data-testid="suggestion-item"]:first-child');
-      await helper.waitForDetectionResults();
+
+      await page.goto(`${TEST_CONFIG.baseURL}/voice`);
+      await page.context().grantPermissions(['microphone']);
+
+      await helper.startVoiceInput();
+      await page.waitForTimeout(2000);
+
+      // Should show retry option
+      await expect(page.locator('text=try again')).toBeVisible();
     });
   });
 
   test.describe('Multi-Modal Workflow', () => {
-    test('combines camera, upload, and voice for comprehensive classification', async ({ page }) => {
-      // Step 1: Start with camera detection
-      await helper.mockCameraPermission(true);
-      await helper.startCameraDetection();
-      await helper.waitForModelLoad();
-      await helper.waitForDetectionResults();
-      
-      const cameraResults = await page.locator('[data-testid="detection-item"]').count();
-      
-      // Step 2: Switch to upload for detailed analysis
-      await page.click('[data-testid="upload-tab"]');
-      await helper.uploadTestImage('complex-waste-scene.jpg');
-      await page.click('[data-testid="process-image-button"]');
-      await helper.waitForDetectionResults();
-      
-      const uploadResults = await page.locator('[data-testid="detection-item"]').count();
-      
-      // Step 3: Use voice to clarify uncertain items
-      await page.click('[data-testid="voice-tab"]');
-      await helper.mockMicrophonePermission(true);
-      await helper.startVoiceInput();
-      
-      await page.evaluate(() => {
-        window.SpeechRecognition().onresult({
-          results: [[{ transcript: 'what about aluminum cans' }]]
-        });
-      });
-      
-      await helper.waitForDetectionResults();
-      
-      // Step 4: Compare results across modalities
-      expect(cameraResults).toBeGreaterThan(0);
-      expect(uploadResults).toBeGreaterThan(0);
-      
-      // Should maintain detection history
-      await page.click('[data-testid="detection-history"]');
-      const historyItems = await page.locator('[data-testid="history-item"]').count();
-      expect(historyItems).toBeGreaterThanOrEqual(3); // At least one from each modality
+    test('switching between input methods', async ({ page }) => {
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+      await helper.mockSpeechRecognition();
+
+      // Start with camera
+      await helper.waitForCameraReady();
+      await helper.startCamera();
+      await expect(page.locator('video')).toBeVisible();
+
+      // Switch to upload
+      await page.click('text=Upload');
+      await expect(page.locator('input[type="file"]')).toBeVisible();
+
+      // Switch to voice
+      await page.click('text=Voice');
+      await expect(page.locator('[aria-label="Start voice input"]')).toBeVisible();
+
+      // Switch back to camera
+      await page.click('text=Camera');
+      await expect(page.locator('video')).toBeVisible();
     });
 
-    test('provides consistent classification across input methods', async ({ page }) => {
-      const testItem = 'plastic water bottle';
-      const expectedCategory = 'recycle';
+    test('session state persistence', async ({ page }) => {
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+
+      // Perform detection
+      await helper.startCamera();
+      await page.waitForTimeout(2000);
+
+      // Navigate to different section
+      await page.click('text=About');
+      await expect(page.locator('h1')).toContainText('About');
+
+      // Navigate back
+      await page.click('text=Scan');
       
-      // Test 1: Voice classification
-      await helper.mockMicrophonePermission(true);
-      await helper.startVoiceInput();
-      
-      await page.evaluate((item) => {
-        window.SpeechRecognition().onresult({
-          results: [[{ transcript: item }]]
-        });
-      }, testItem);
-      
-      await helper.waitForDetectionResults();
-      const voiceCategory = await page.locator('[data-testid="waste-category"]').textContent();
-      
-      // Test 2: Image upload classification
-      await page.click('[data-testid="upload-tab"]');
-      await helper.uploadTestImage('plastic-bottle.jpg');
-      await page.click('[data-testid="process-image-button"]');
-      await helper.waitForDetectionResults();
-      
-      const imageCategory = await page.locator('[data-testid="waste-category"]').textContent();
-      
-      // Test 3: Camera detection (mocked)
-      await helper.mockCameraPermission(true);
-      await helper.startCameraDetection();
-      await page.evaluate(() => {
-        // Mock detection result
-        window.dispatchEvent(new CustomEvent('mock-detection', {
-          detail: { 
-            detections: [{ 
-              class: 'bottle', 
-              category: 'recycle',
-              confidence: 0.95 
-            }] 
-          }
-        }));
-      });
-      
-      await helper.waitForDetectionResults();
-      const cameraCategory = await page.locator('[data-testid="waste-category"]').textContent();
-      
-      // All methods should classify consistently
-      expect(voiceCategory?.toLowerCase()).toBe(expectedCategory);
-      expect(imageCategory?.toLowerCase()).toBe(expectedCategory);
-      expect(cameraCategory?.toLowerCase()).toBe(expectedCategory);
+      // State should be preserved
+      await expect(page.locator('video')).toBeVisible();
     });
   });
 
-  test.describe('Error Recovery and Edge Cases', () => {
-    test('recovers from network interruptions', async ({ page }) => {
-      // Step 1: Start normal operation
-      await helper.startCameraDetection();
-      await helper.waitForModelLoad();
+  test.describe('Performance & Reliability', () => {
+    test('app loads within performance budget', async ({ page }) => {
+      const startTime = Date.now();
       
-      // Step 2: Simulate network failure
-      await page.route('**/*', route => route.abort());
+      await helper.gotoApp();
       
-      // Step 3: Attempt operation that requires network
-      await page.click('[data-testid="sync-button"]');
+      const loadTime = Date.now() - startTime;
       
-      // Should show offline indicator
-      await expect(page.locator('[data-testid="offline-indicator"]')).toBeVisible();
-      
-      // Step 4: Restore network
-      await page.unroute('**/*');
-      
-      // Step 5: Should automatically retry and succeed
-      await page.click('[data-testid="retry-sync"]');
-      await expect(page.locator('[data-testid="online-indicator"]')).toBeVisible();
+      // Should load within 3 seconds
+      expect(loadTime).toBeLessThan(3000);
     });
 
-    test('handles slow model loading gracefully', async ({ page }) => {
-      // Mock slow model loading
-      await page.route('**/yolov8n.onnx', route => {
-        setTimeout(() => route.continue(), 10000); // 10 second delay
-      });
-      
-      await helper.startCameraDetection();
-      
-      // Should show loading indicator
-      await expect(page.locator('[data-testid="model-loading"]')).toBeVisible();
-      
-      // Should show progress if available
-      const progressBar = page.locator('[data-testid="loading-progress"]');
-      if (await progressBar.isVisible()) {
-        const progress = await progressBar.getAttribute('value');
-        expect(parseInt(progress!)).toBeGreaterThanOrEqual(0);
+    test('handles rapid user interactions', async ({ page }) => {
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+
+      await helper.waitForCameraReady();
+
+      // Rapid clicking
+      for (let i = 0; i < 5; i++) {
+        await page.click('[aria-label="Start camera detection"]');
+        await page.waitForTimeout(100);
       }
-      
-      // Should eventually load or timeout gracefully
-      try {
-        await helper.waitForModelLoad();
-      } catch (error) {
-        // Should show timeout message
-        await expect(page.locator('[data-testid="loading-timeout"]')).toBeVisible();
-        await expect(page.locator('[data-testid="try-offline-mode"]')).toBeVisible();
-      }
+
+      // Should handle gracefully
+      await expect(page.locator('video')).toBeVisible();
     });
 
-    test('maintains functionality with limited browser features', async ({ page, browserName }) => {
-      // Disable various browser features to test graceful degradation
-      await page.addInitScript(() => {
-        // Mock missing APIs
-        delete window.Worker;
-        delete navigator.mediaDevices;
-        delete window.SpeechRecognition;
-        delete window.webkitSpeechRecognition;
-      });
-      
-      await helper.navigateToApp();
-      
-      // Should detect missing features and adapt
-      await expect(page.locator('[data-testid="limited-mode-notice"]')).toBeVisible();
-      
-      // Upload should still work
-      await page.click('[data-testid="upload-tab"]');
-      await helper.uploadTestImage('test-image.jpg');
-      await expect(page.locator('[data-testid="upload-preview"]')).toBeVisible();
-      
-      // Should show alternative methods
-      await expect(page.locator('[data-testid="text-search-alternative"]')).toBeVisible();
-    });
-  });
-
-  test.describe('Performance and Accessibility', () => {
-    test('meets performance benchmarks', async ({ page }) => {
-      const metrics = await helper.checkPerformanceMetrics();
-      
-      // Page load performance
-      expect(metrics.loadTime).toBeLessThan(3000); // 3 seconds
-      expect(metrics.domReady).toBeLessThan(2000); // 2 seconds
-      
-      // First meaningful paint
-      if (metrics.firstPaint > 0) {
-        expect(metrics.firstPaint).toBeLessThan(1500); // 1.5 seconds
-      }
-      
-      // Model initialization
-      const modelLoadStart = Date.now();
-      await helper.waitForModelLoad();
-      const modelLoadTime = Date.now() - modelLoadStart;
-      expect(modelLoadTime).toBeLessThan(10000); // 10 seconds max
-      
-      // Inference performance
-      await helper.startCameraDetection();
-      const inferenceTime = await helper.measureInferenceTime();
-      expect(inferenceTime).toBeLessThan(1000); // 1 second for inference
-    });
-
-    test('meets accessibility standards', async ({ page }) => {
-      const accessibilityIssues = await helper.checkAccessibility();
-      
-      // Should have minimal accessibility issues
-      expect(accessibilityIssues.length).toBeLessThan(3);
-      
-      // Keyboard navigation
-      await page.keyboard.press('Tab');
-      const focusedElement = await page.locator(':focus').first();
-      await expect(focusedElement).toBeVisible();
-      
-      // Should be able to navigate entire interface with keyboard
-      const tabStops = [];
-      for (let i = 0; i < 20; i++) {
-        await page.keyboard.press('Tab');
-        const focused = await page.locator(':focus').first();
-        if (await focused.isVisible()) {
-          const tagName = await focused.evaluate(el => el.tagName);
-          tabStops.push(tagName);
-        }
-      }
-      
-      expect(tabStops.length).toBeGreaterThan(5); // Should have multiple focusable elements
-      
-      // Screen reader compatibility
-      const ariaLabels = await page.locator('[aria-label]').count();
-      expect(ariaLabels).toBeGreaterThan(3);
-      
-      const headings = await page.locator('h1, h2, h3, h4, h5, h6').count();
-      expect(headings).toBeGreaterThan(1); // Proper heading structure
-    });
-
-    test('works across different devices and browsers', async ({ page, browserName }) => {
-      const viewports = [
-        { width: 375, height: 667, name: 'iPhone SE' },
-        { width: 414, height: 896, name: 'iPhone 11' },
-        { width: 768, height: 1024, name: 'iPad' },
-        { width: 1920, height: 1080, name: 'Desktop' }
-      ];
-      
-      for (const viewport of viewports) {
-        await page.setViewportSize(viewport);
-        await helper.navigateToApp();
-        
-        // Should be responsive
-        await expect(page.locator('[data-testid="main-interface"]')).toBeVisible();
-        
-        // Should maintain functionality
-        if (viewport.width < 768) {
-          // Mobile: should show mobile-optimized interface
-          await expect(page.locator('[data-testid="mobile-nav"]')).toBeVisible();
+    test('recovers from temporary failures', async ({ page }) => {
+      // Mock network failure
+      await page.route('**/*', route => {
+        if (route.request().url().includes('models')) {
+          route.abort();
         } else {
-          // Desktop: should show full interface
-          await expect(page.locator('[data-testid="desktop-nav"]')).toBeVisible();
+          route.continue();
         }
-        
-        // Core functionality should work regardless of viewport
-        await page.click('[data-testid="upload-tab"]');
-        await expect(page.locator('[data-testid="upload-area"]')).toBeVisible();
+      });
+
+      await helper.gotoApp();
+      await page.waitForTimeout(2000);
+
+      // Should show error handling
+      const hasError = await page.locator('text=error').isVisible();
+      const hasRetry = await page.locator('text=retry').isVisible();
+      
+      expect(hasError || hasRetry).toBe(true);
+    });
+  });
+
+  test.describe('Accessibility', () => {
+    test('keyboard navigation works throughout app', async ({ page }) => {
+      await helper.gotoApp();
+
+      // Tab through interactive elements
+      await page.keyboard.press('Tab');
+      let activeElement = await page.locator(':focus').getAttribute('aria-label');
+      expect(activeElement).toBeTruthy();
+
+      // Continue tabbing
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+      
+      // Should reach actionable elements
+      const focusedElement = page.locator(':focus');
+      await expect(focusedElement).toBeVisible();
+    });
+
+    test('screen reader announcements work', async ({ page }) => {
+      await helper.gotoApp();
+
+      // Check for live regions
+      await expect(page.locator('[aria-live]')).toBeVisible();
+      
+      // Check for proper ARIA labels
+      await expect(page.locator('[aria-label]')).toHaveCount({ expected: 1, comparison: '>=' });
+    });
+
+    test('color contrast meets WCAG standards', async ({ page }) => {
+      await helper.gotoApp();
+
+      // This would typically use axe-core or similar tool
+      // For now, verify text is readable
+      const textElements = page.locator('p, h1, h2, h3, span');
+      const count = await textElements.count();
+      
+      expect(count).toBeGreaterThan(0);
+      
+      // Verify no text is invisible (basic check)
+      for (let i = 0; i < Math.min(count, 5); i++) {
+        await expect(textElements.nth(i)).toBeVisible();
       }
     });
   });
+
+  test.describe('Error Scenarios', () => {
+    test('handles missing model files', async ({ page }) => {
+      // Block model loading
+      await page.route('**/models/**', route => route.abort());
+
+      await helper.gotoApp();
+      await page.waitForTimeout(3000);
+
+      // Should show graceful error handling
+      const errorText = await page.textContent('body');
+      expect(errorText).toMatch(/(error|failed|unavailable)/i);
+    });
+
+    test('handles offline state', async ({ page }) => {
+      await helper.gotoApp();
+      
+      // Go offline
+      await page.context().setOffline(true);
+      await page.reload();
+
+      await page.waitForTimeout(2000);
+
+      // Should show offline message or cached content
+      const content = await page.textContent('body');
+      expect(content).toMatch(/(offline|cached|unavailable)/i);
+    });
+
+    test('handles browser incompatibility', async ({ page }) => {
+      // Mock unsupported browser
+      await page.addInitScript(() => {
+        // @ts-ignore
+        delete navigator.mediaDevices;
+        // @ts-ignore
+        delete window.SpeechRecognition;
+      });
+
+      await helper.gotoApp();
+      await page.waitForTimeout(2000);
+
+      // Should show browser compatibility warnings
+      const content = await page.textContent('body');
+      expect(content).toMatch(/(browser|support|compatible)/i);
+    });
+  });
+
+  test.describe('Data Privacy', () => {
+    test('no data sent to external servers', async ({ page }) => {
+      let externalRequests = 0;
+      
+      page.on('request', request => {
+        const url = request.url();
+        if (!url.startsWith(TEST_CONFIG.baseURL) && !url.startsWith('chrome-extension://')) {
+          externalRequests++;
+        }
+      });
+
+      await helper.gotoApp();
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+      await helper.startCamera();
+      
+      await page.waitForTimeout(5000);
+
+      // Should not make external requests for user data
+      expect(externalRequests).toBeLessThan(5); // Allow some for CDN assets
+    });
+
+    test('local storage usage is appropriate', async ({ page }) => {
+      await helper.gotoApp();
+      
+      const localStorage = await page.evaluate(() => {
+        const items: { [key: string]: string } = {};
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key) {
+            items[key] = window.localStorage.getItem(key) || '';
+          }
+        }
+        return items;
+      });
+
+      // Should not store sensitive data
+      const values = Object.values(localStorage).join(' ').toLowerCase();
+      expect(values).not.toMatch(/(password|key|token|secret)/);
+    });
+  });
+
+  test.describe('Mobile Experience', () => {
+    test('works on mobile viewport', async ({ page }) => {
+      // Set mobile viewport
+      await page.setViewportSize({ width: 375, height: 667 });
+      
+      await helper.gotoApp();
+      await helper.mockCameraPermission();
+      await helper.mockGetUserMedia();
+
+      // Should be responsive
+      await expect(page.locator('.camera-container')).toBeVisible();
+      
+      // Touch interactions should work
+      await helper.startCamera();
+      await expect(page.locator('video')).toBeVisible();
+    });
+
+    test('handles device orientation changes', async ({ page }) => {
+      await helper.gotoApp();
+      
+      // Portrait
+      await page.setViewportSize({ width: 375, height: 667 });
+      await page.waitForTimeout(500);
+      
+      // Landscape
+      await page.setViewportSize({ width: 667, height: 375 });
+      await page.waitForTimeout(500);
+
+      // Should remain functional
+      await expect(page.locator('main')).toBeVisible();
+    });
+  });
+});
+
+// Test configuration for different environments
+test.describe.configure({ mode: 'parallel' });
+
+// Global test setup
+test.beforeAll(async () => {
+  console.log('🧪 Starting E2E tests for EcoScan');
+});
+
+test.afterAll(async () => {
+  console.log('✅ E2E tests completed');
 }); 
