@@ -22,7 +22,7 @@
   import { isBrowser, isUserMediaSupported, safeNavigator, safeDocument, checkCameraCompatibility, getOptimalCameraConstraints, getCameraDevicePreferences, getBrowserInfo, getDeviceInfo, isDeviceMobile } from '$lib/utils/browser.js';
   import { perf, getPerformanceMonitor, performanceMetrics, currentFPS, currentInferenceTime } from '$lib/utils/performance-monitor.js';
   import FallbackDetection from './FallbackDetection.svelte';
-  import { getOfflineManager, offlineStatus, isOfflineMode } from '$lib/utils/offline-manager.js';
+  import { offlineManager, isOffline } from '$lib/utils/offline-manager.js';
   import { diagnostic } from '$lib/utils/diagnostic.js';
   import { safeAsyncOperation, isSecureContext, initializeClientFeatures } from '$lib/utils/ssr-safe.js';
   import { errorRecovery } from '$lib/utils/error-recovery.js';
@@ -792,7 +792,7 @@
         // Use offline detection
         console.log('📴 Performing offline detection...');
         perf.start('offlineDetection');
-        const offlineManager = getOfflineManager();
+        // Using imported offlineManager instance
         detectedObjects = await offlineManager.detectOffline(imageDataUrl);
         const offlineTime = perf.end('offlineDetection', 'ml');
         
@@ -875,7 +875,7 @@
         console.log('🔄 Falling back to offline detection...');
         try {
           const imageDataUrl = canvasElement.toDataURL('image/jpeg', 0.8);
-          const offlineManager = getOfflineManager();
+          // Using imported offlineManager instance
           const fallbackDetections = await offlineManager.detectOffline(imageDataUrl);
           detections.set(fallbackDetections);
           drawDetections(fallbackDetections);
@@ -1394,7 +1394,7 @@
   {/if}
 
   <!-- Offline Status Indicator -->
-  {#if $isOfflineMode}
+  {#if isOffline()}
     <div class="absolute top-4 right-4 bg-orange-500 text-white px-3 py-2 rounded-lg flex items-center space-x-2">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192L5.636 18.364M12 2v2.25M12 19.75V22M2 12h2.25M19.75 12H22"></path>
@@ -1411,12 +1411,12 @@
   {/if}
 
   <!-- Sync Status Indicator -->
-  {#if $offlineStatus.pendingSync > 0}
+  {#if offlineManager.getNetworkStatus().queueLength > 0}
     <div class="absolute top-16 right-4 bg-blue-500 text-white px-3 py-2 rounded-lg flex items-center space-x-2">
       <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
       </svg>
-      <span class="text-sm font-medium">{$offlineStatus.pendingSync} pending sync</span>
+      <span class="text-sm font-medium">{offlineManager.getNetworkStatus().queueLength} pending sync</span>
     </div>
   {/if}
 </div>
