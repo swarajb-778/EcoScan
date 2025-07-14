@@ -80,8 +80,14 @@ export default defineConfig({
 		rollupOptions: {
 			output: {
 				manualChunks: (id) => {
-					if (id.includes('fuse.js')) {
-						return 'search-vendor';
+					// Only chunk external dependencies, not internal modules
+					if (id.includes('node_modules')) {
+						if (id.includes('fuse.js')) {
+							return 'search-vendor';
+						}
+						if (id.includes('onnxruntime-web')) {
+							return 'ml-vendor';
+						}
 					}
 				}
 			}
