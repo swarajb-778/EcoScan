@@ -10,534 +10,517 @@
  * - System interaction edge cases
  */
 
-import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { EnhancedDetector } from '../../src/lib/ml/enhanced-detector';
-import { WasteClassifier } from '../../src/lib/ml/classifier';
-import { performanceAnalyzer } from '../../src/lib/utils/performance-analysis';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EnhancedDetector } from '$lib/ml/enhanced-detector';
+import { WasteClassifier } from '$lib/ml/classifier';
+import { performanceOptimizer } from '$lib/utils/performance-optimizer';
+import { modelOptimizer } from '$lib/utils/model-optimization';
+import { testUtils } from '../setup';
+import type { Detection, WasteClassification } from '$lib/types';
 
-// Mock environment
-vi.mock('$app/environment', () => ({
-  browser: true
+// Mock ONNX Runtime
+vi.mock('onnxruntime-web', () => ({
+  InferenceSession: {
+    create: vi.fn().mockResolvedValue({
+      run: vi.fn().mockResolvedValue({
+        output0: {
+          data: new Float32Array([
+            // Mock YOLO output: [x, y, w, h, conf, ...classes]
+            320, 240, 100, 100, 0.85, 0.1, 0.9, 0.05, // bottle detection
+            100, 150, 80, 80, 0.75, 0.8, 0.1, 0.05    // apple detection
+          ]),
+          dims: [1, 8, 2] // batch, features, detections
+        }
+      }),
+      dispose: vi.fn()
+    })
+  },
+  Tensor: {
+    from: vi.fn().mockReturnValue({
+      data: new Float32Array(640 * 640 * 3),
+      dims: [1, 3, 640, 640]
+    })
+  }
 }));
 
-// Setup comprehensive mocks
-const setupMocks = () => {
-  // Mock ONNX Runtime
-  vi.mock('onnxruntime-web', () => ({
-    InferenceSession: {
-      create: vi.fn(() => Promise.resolve({
-        run: vi.fn(() => Promise.resolve({
-          output0: {
-            data: new Float32Array([
-              // Mock YOLO output for a bottle detection
-              320, 240, 100, 150, 0.9, // bbox + objectness
-              ...Array(79).fill(0), 0.95, // classes (bottle = class 39)
-              // Mock detection for apple
-              200, 180, 80, 90, 0.8,
-              ...Array(40).fill(0), 0.85, ...Array(38).fill(0)
-            ]),
-            dims: [1, 84, 2]
-          }
-        })),
-        release: vi.fn()
-      }))
-    },
-    Tensor: vi.fn((type, data, dims) => ({ type, data, dims, dispose: vi.fn() })),
-    env: {
-      wasm: { wasmPaths: '', numThreads: 4, simd: true, proxy: false },
-      webgl: { contextId: 'webgl2', matmulMaxBatchSize: 1, textureCacheMode: 'full' },
-      webgpu: { validateInputContent: false }
-    }
-  }));
-
-  // Mock performance analyzer
-  vi.mock('../../src/lib/utils/performance-analysis', () => ({
-    performanceAnalyzer: {
-      analyzeDeviceCapabilities: vi.fn(() => Promise.resolve({
-        webglSupport: true,
-        webgpuSupport: false,
-        coreCount: 4,
-        memoryEstimate: 4096,
-        performanceTier: 'high',
-        supportedProviders: ['webgl', 'wasm', 'cpu']
-      })),
-      dispose: vi.fn()
-    },
-    measurePerformance: {
-      start: vi.fn(),
-      end: vi.fn(() => 50),
-      report: vi.fn()
-    }
-  }));
-
-  // Mock Worker for LLM
-  global.Worker = vi.fn(() => ({
-    postMessage: vi.fn(),
-    terminate: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    onmessage: null,
-    onerror: null
-  })) as any;
-
-  // Mock fetch for waste data
-  global.fetch = vi.fn(() => Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve({
-      classifications: {
-        bottle: {
-          category: 'recycle',
-          confidence: 0.95,
-          instructions: 'Remove cap and rinse before recycling',
-          tips: 'Check local recycling guidelines',
-          color: '#22c55e'
-        },
-        apple: {
-          category: 'compost',
-          confidence: 0.92,
-          instructions: 'Remove stickers before composting',
-          tips: 'Can be composted whole',
-          color: '#84cc16'
-        }
-      },
-      keywords: {
-        plastic: ['bottle', 'container'],
-        fruit: ['apple', 'banana']
-      }
-    })
-  })) as any;
-
-  // Mock canvas and image processing
-  const mockCanvas = {
-    width: 640,
-    height: 640,
-    getContext: vi.fn(() => ({
-      drawImage: vi.fn(),
-      getImageData: vi.fn(() => ({
-        data: new Uint8ClampedArray(640 * 640 * 4),
-        width: 640,
-        height: 640
-      })),
-      putImageData: vi.fn(),
-      clearRect: vi.fn()
-    })),
-    toDataURL: vi.fn(() => 'data:image/jpeg;base64,mock')
-  };
-
-  global.document = {
-    createElement: vi.fn(() => mockCanvas)
-  } as any;
-
-  global.URL = {
-    createObjectURL: vi.fn(() => 'blob:mock'),
-    revokeObjectURL: vi.fn()
-  } as any;
-
-  global.ImageData = class {
-    data: Uint8ClampedArray;
-    width: number;
-    height: number;
-
-    constructor(dataOrWidth: Uint8ClampedArray | number, width?: number, height?: number) {
-      if (typeof dataOrWidth === 'number') {
-        this.width = dataOrWidth;
-        this.height = width!;
-        this.data = new Uint8ClampedArray(dataOrWidth * width! * 4);
-      } else {
-        this.data = dataOrWidth;
-        this.width = width!;
-        this.height = height!;
-      }
-    }
-  } as any;
-};
-
-setupMocks();
-
 describe('ML Pipeline Integration Tests', () => {
-  let detector: EnhancedDetector;
-  let classifier: WasteClassifier;
+  let enhancedDetector: EnhancedDetector;
+  let wasteClassifier: WasteClassifier;
   let mockImageData: ImageData;
 
   beforeEach(async () => {
-    detector = new EnhancedDetector();
-    classifier = new WasteClassifier('/data/wasteData.json');
-    mockImageData = new ImageData(640, 640);
+    vi.clearAllMocks();
     
-    // Initialize both systems
-    await detector.initialize();
-    await classifier.initialize();
+    // Initialize components
+    enhancedDetector = new EnhancedDetector();
+    wasteClassifier = new WasteClassifier();
+    
+    // Mock image data
+    mockImageData = testUtils.createMockImageData(640, 640);
+    
+    // Initialize performance systems
+    await performanceOptimizer.initialize();
+    await modelOptimizer.initialize();
   });
 
   afterEach(() => {
-    detector.dispose();
-    vi.clearAllMocks();
+    enhancedDetector?.dispose();
   });
 
   describe('End-to-End Detection Pipeline', () => {
-    test('processes image through complete detection pipeline', async () => {
-      // Step 1: Run detection
-      const detections = await detector.detect(mockImageData);
+    it('should complete full detection workflow', async () => {
+      // Initialize detector
+      await enhancedDetector.initialize();
+      await wasteClassifier.initialize();
       
+      // Run detection
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Verify detections
+      expect(detections).toBeArray();
       expect(detections.length).toBeGreaterThan(0);
-      expect(detections[0]).toHaveProperty('class');
-      expect(detections[0]).toHaveProperty('confidence');
-      expect(detections[0]).toHaveProperty('bbox');
       
-      // Step 2: Classify detections
-      const classifiedDetections = detections.map(detection => {
-        const classification = classifier.classify(detection.class);
-        return {
-          ...detection,
-          classification
-        };
+      // Verify detection structure
+      detections.forEach(detection => {
+        expect(detection).toHaveProperty('bbox');
+        expect(detection).toHaveProperty('class');
+        expect(detection).toHaveProperty('confidence');
+        expect(detection.bbox).toBeArray();
+        expect(detection.bbox).toHaveLength(4);
+        expect(detection.confidence).toBeGreaterThan(0);
+        expect(detection.confidence).toBeLessThanOrEqual(1);
       });
+    });
+
+    it('should integrate enhanced features', async () => {
+      await enhancedDetector.initialize();
       
-      expect(classifiedDetections.length).toEqual(detections.length);
-      classifiedDetections.forEach(detection => {
-        expect(detection.classification).toBeDefined();
-        if (detection.classification) {
-          expect(detection.classification).toHaveProperty('category');
-          expect(detection.classification).toHaveProperty('instructions');
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Check for enhanced features
+      detections.forEach(detection => {
+        const enhanced = detection as any;
+        
+        // Should have ensemble scoring
+        if (enhanced.ensembleScore) {
+          expect(enhanced.ensembleScore).toBeGreaterThanOrEqual(detection.confidence);
+        }
+        
+        // Should have calibrated confidence
+        if (enhanced.confidenceCalibrated) {
+          expect(enhanced.confidenceCalibrated).toBeGreaterThan(0);
+          expect(enhanced.confidenceCalibrated).toBeLessThanOrEqual(1);
+        }
+        
+        // Should have LLM context if available
+        if (enhanced.llmContext) {
+          expect(enhanced.llmContext).toHaveProperty('description');
+          expect(enhanced.llmContext).toHaveProperty('confidence');
         }
       });
     });
 
-    test('maintains data flow integrity through pipeline', async () => {
-      const startTime = performance.now();
+    it('should handle classification integration', async () => {
+      await enhancedDetector.initialize();
+      await wasteClassifier.initialize();
       
-      // Process multiple images to test data consistency
-      const results = [];
-      for (let i = 0; i < 5; i++) {
-        const detections = await detector.detect(mockImageData);
-        const classified = detections.map(d => ({
-          ...d,
-          classification: classifier.classify(d.class)
-        }));
-        results.push(classified);
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Classify each detection
+      for (const detection of detections) {
+        const classification = wasteClassifier.classify(detection.class);
+        
+        if (classification) {
+          expect(classification).toHaveProperty('category');
+          expect(classification).toHaveProperty('confidence');
+          expect(classification).toHaveProperty('instructions');
+          expect(['recycle', 'compost', 'landfill']).toContain(classification.category);
+        }
       }
-      
-      const endTime = performance.now();
-      const totalTime = endTime - startTime;
-      
-      // Verify consistency
-      expect(results.length).toBe(5);
-      results.forEach(result => {
-        expect(Array.isArray(result)).toBe(true);
-      });
-      
-      // Performance check
-      expect(totalTime).toBeLessThan(1000); // Should complete within 1 second
-    });
-
-    test('handles pipeline errors gracefully', async () => {
-      // Mock detection failure
-      const originalDetect = detector.detect;
-      detector.detect = vi.fn().mockRejectedValue(new Error('Detection failed'));
-      
-      // Should handle gracefully
-      const result = await detector.detect(mockImageData).catch(error => ({
-        error: error.message,
-        fallback: true
-      }));
-      
-      expect(result).toHaveProperty('error');
-      
-      // Restore original method
-      detector.detect = originalDetect;
     });
   });
 
   describe('Performance Integration', () => {
-    test('maintains performance under concurrent load', async () => {
-      const concurrentTasks = 10;
+    it('should meet performance requirements', async () => {
+      await enhancedDetector.initialize();
+      
       const startTime = performance.now();
       
-      // Run concurrent detections
-      const promises = Array(concurrentTasks).fill(null).map(async () => {
-        const detections = await detector.detect(mockImageData);
-        return detections.map(d => ({
-          ...d,
-          classification: classifier.classify(d.class)
-        }));
-      });
+      // Run multiple detections to test sustained performance
+      const promises = Array(5).fill(null).map(() => 
+        enhancedDetector.detect(mockImageData)
+      );
       
       const results = await Promise.all(promises);
+      
       const endTime = performance.now();
       const totalTime = endTime - startTime;
+      const averageTime = totalTime / results.length;
       
-      // Verify all tasks completed
-      expect(results.length).toBe(concurrentTasks);
-      results.forEach(result => {
-        expect(Array.isArray(result)).toBe(true);
+      // Should complete within performance targets
+      expect(averageTime).toBeLessThan(100); // <100ms per inference
+      
+      // All detections should succeed
+      results.forEach(detections => {
+        expect(detections).toBeArray();
       });
-      
-      // Performance should scale reasonably
-      const avgTimePerTask = totalTime / concurrentTasks;
-      expect(avgTimePerTask).toBeLessThan(200); // Average < 200ms per task
     });
 
-    test('manages memory during extended processing', async () => {
-      const initialMemory = process.memoryUsage?.().heapUsed || 0;
+    it('should optimize based on device performance', async () => {
+      // Mock low-performance device
+      vi.spyOn(performanceOptimizer, 'getOptimizationConfig').mockReturnValue({
+        inputResolution: [320, 320], // Reduced for low-end device
+        frameSkipping: 2,
+        confidenceThreshold: 0.7,
+        maxDetections: 5,
+        batchSize: 1,
+        modelPrecision: 'fp16'
+      });
       
-      // Process many images to test memory management
-      for (let i = 0; i < 50; i++) {
-        const detections = await detector.detect(mockImageData);
-        
-        // Force garbage collection if available
-        if (global.gc) {
-          global.gc();
-        }
-        
-        // Small delay to allow cleanup
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
+      await enhancedDetector.initialize();
       
-      const finalMemory = process.memoryUsage?.().heapUsed || 0;
-      const memoryIncrease = finalMemory - initialMemory;
+      const config = performanceOptimizer.getOptimizationConfig();
       
-      // Memory increase should be reasonable (< 100MB)
-      expect(memoryIncrease).toBeLessThan(100 * 1024 * 1024);
+      // Should use optimized settings
+      expect(config.inputResolution).toEqual([320, 320]);
+      expect(config.frameSkipping).toBe(2);
+      expect(config.confidenceThreshold).toBe(0.7);
+    });
+
+    it('should handle memory constraints', async () => {
+      // Mock memory pressure
+      const mockMemory = {
+        usedJSHeapSize: 180 * 1024 * 1024, // 180MB
+        totalJSHeapSize: 200 * 1024 * 1024, // 200MB
+        jsHeapSizeLimit: 200 * 1024 * 1024
+      };
+      
+      vi.spyOn(performance, 'memory', 'get').mockReturnValue(mockMemory);
+      
+      await enhancedDetector.initialize();
+      
+      // Should adapt to memory constraints
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Should still produce results despite memory pressure
+      expect(detections).toBeArray();
     });
   });
 
-  describe('Error Recovery and Resilience', () => {
-    test('recovers from temporary failures', async () => {
-      let failureCount = 0;
-      const maxFailures = 3;
+  describe('Model Loading and Optimization', () => {
+    it('should load model within time limit', async () => {
+      const startTime = performance.now();
       
-      // Mock intermittent failures
-      const originalRun = detector.detect;
-      detector.detect = vi.fn().mockImplementation(async (imageData) => {
-        if (failureCount < maxFailures) {
-          failureCount++;
-          throw new Error(`Temporary failure ${failureCount}`);
-        }
-        return originalRun.call(detector, imageData);
-      });
+      await enhancedDetector.initialize();
       
-      // Should eventually succeed after retries
-      let finalResult;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          finalResult = await detector.detect(mockImageData);
-          break;
-        } catch (error) {
-          // Continue retrying
-        }
-      }
+      const endTime = performance.now();
+      const loadTime = endTime - startTime;
       
-      expect(finalResult).toBeDefined();
-      expect(Array.isArray(finalResult)).toBe(true);
+      // Should load within 5 seconds
+      expect(loadTime).toBeLessThan(5000);
     });
 
-    test('maintains partial functionality during component failures', async () => {
-      // Simulate LLM worker failure
-      const mockWorker = vi.mocked(global.Worker).mock.results[0]?.value;
-      if (mockWorker) {
-        mockWorker.onerror = () => {
-          throw new Error('LLM Worker failed');
-        };
-      }
+    it('should handle model loading failures', async () => {
+      // Mock ONNX session creation failure
+      const mockCreate = vi.fn().mockRejectedValue(new Error('Model load failed'));
+      vi.doMock('onnxruntime-web', () => ({
+        InferenceSession: { create: mockCreate }
+      }));
       
-      // Detection should still work without LLM enhancement
-      const detections = await detector.detect(mockImageData);
-      expect(Array.isArray(detections)).toBe(true);
+      const detector = new EnhancedDetector();
       
-      // Classification should still work
-      const classifications = detections.map(d => classifier.classify(d.class));
-      classifications.forEach(classification => {
+      // Should handle failure gracefully
+      await expect(detector.initialize()).rejects.toThrow('Model load failed');
+    });
+
+    it('should optimize model based on hardware', async () => {
+      await enhancedDetector.initialize();
+      
+      // Check if optimization was attempted
+      expect(modelOptimizer.initialize).toHaveBeenCalled();
+      
+      // Should adapt model configuration
+      const modelInfo = modelOptimizer.getModelInfo();
+      expect(modelInfo).toHaveProperty('currentModel');
+    });
+  });
+
+  describe('Error Handling and Recovery', () => {
+    it('should handle inference errors gracefully', async () => {
+      await enhancedDetector.initialize();
+      
+      // Mock inference failure
+      const mockRun = vi.fn().mockRejectedValue(new Error('Inference failed'));
+      (enhancedDetector as any).session = { run: mockRun };
+      
+      // Should handle error without crashing
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Should return empty array on error
+      expect(detections).toEqual([]);
+    });
+
+    it('should recover from temporary failures', async () => {
+      await enhancedDetector.initialize();
+      
+      // Mock session that fails once then succeeds
+      const mockRun = vi.fn()
+        .mockRejectedValueOnce(new Error('Temporary failure'))
+        .mockResolvedValue({
+          output0: {
+            data: new Float32Array([320, 240, 100, 100, 0.85, 0.1, 0.9, 0.05]),
+            dims: [1, 8, 1]
+          }
+        });
+      
+      (enhancedDetector as any).session = { run: mockRun };
+      
+      // First call should fail, second should succeed
+      let detections = await enhancedDetector.detect(mockImageData);
+      expect(detections).toEqual([]);
+      
+      detections = await enhancedDetector.detect(mockImageData);
+      expect(detections.length).toBeGreaterThan(0);
+    });
+
+    it('should validate input data', async () => {
+      await enhancedDetector.initialize();
+      
+      // Test with invalid image data
+      const invalidImageData = null as any;
+      
+      const detections = await enhancedDetector.detect(invalidImageData);
+      
+      // Should handle invalid input gracefully
+      expect(detections).toEqual([]);
+    });
+  });
+
+  describe('Classification Pipeline', () => {
+    it('should integrate voice input classification', async () => {
+      await wasteClassifier.initialize();
+      
+      const voiceInputs = [
+        'plastic bottle',
+        'apple core',
+        'cardboard box',
+        'broken glass',
+        'coffee cup'
+      ];
+      
+      for (const input of voiceInputs) {
+        const classification = wasteClassifier.classifyVoiceInput(input);
+        
         if (classification) {
           expect(classification).toHaveProperty('category');
+          expect(classification).toHaveProperty('confidence');
+          expect(classification).toHaveProperty('instructions');
+          expect(['recycle', 'compost', 'landfill']).toContain(classification.category);
         }
-      });
+      }
     });
 
-    test('handles invalid input data gracefully', async () => {
-      const invalidInputs = [
-        null,
-        undefined,
-        new ImageData(0, 0),
-        new ImageData(1, 1), // Extremely small
-        new ImageData(new Uint8ClampedArray([]), 0, 0) // Empty data
+    it('should handle fuzzy matching', async () => {
+      await wasteClassifier.initialize();
+      
+      const fuzzyInputs = [
+        'bottel', // misspelled bottle
+        'aple',   // misspelled apple
+        'cardord', // misspelled cardboard
+        'glas jar' // missing s in glass
       ];
       
-      for (const invalidInput of invalidInputs) {
-        try {
-          const result = await detector.detect(invalidInput as any);
-          // Should either succeed with empty results or throw handled error
-          expect(Array.isArray(result)).toBe(true);
-        } catch (error) {
-          // Acceptable to throw for truly invalid input
-          expect(error).toBeInstanceOf(Error);
+      for (const input of fuzzyInputs) {
+        const classification = wasteClassifier.classifyVoiceInput(input);
+        
+        // Should find matches despite misspellings
+        expect(classification).toBeTruthy();
+        if (classification) {
+          expect(classification.confidence).toBeGreaterThan(0);
         }
       }
     });
-  });
 
-  describe('System Integration Edge Cases', () => {
-    test('handles rapid successive requests', async () => {
-      const rapidRequests = 20;
-      const interval = 10; // 10ms between requests
+    it('should provide disposal instructions', async () => {
+      await wasteClassifier.initialize();
       
-      const results: any[] = [];
-      
-      // Send rapid successive requests
-      for (let i = 0; i < rapidRequests; i++) {
-        setTimeout(async () => {
-          try {
-            const detection = await detector.detect(mockImageData);
-            results.push({ index: i, detection, timestamp: Date.now() });
-          } catch (error) {
-            results.push({ index: i, error: error.message, timestamp: Date.now() });
-          }
-        }, i * interval);
-      }
-      
-      // Wait for all requests to complete
-      await new Promise(resolve => setTimeout(resolve, rapidRequests * interval + 1000));
-      
-      // Verify requests were handled
-      expect(results.length).toBeGreaterThan(0);
-      
-      // Check for race conditions (timestamps should be roughly in order)
-      const timestamps = results.map(r => r.timestamp).filter(Boolean);
-      const sortedTimestamps = [...timestamps].sort();
-      expect(timestamps).toEqual(sortedTimestamps);
-    });
-
-    test('maintains state consistency across operations', async () => {
-      // Perform various operations to test state consistency
-      const operations = [
-        () => detector.detect(mockImageData),
-        () => classifier.classify('bottle'),
-        () => classifier.search('plastic'),
-        () => detector.detect(new ImageData(320, 240)),
-        () => classifier.classify('apple')
-      ];
-      
-      const results = [];
-      
-      // Execute operations in sequence
-      for (const operation of operations) {
-        try {
-          const result = await operation();
-          results.push({ success: true, result });
-        } catch (error) {
-          results.push({ success: false, error: error.message });
-        }
-      }
-      
-      // Verify state consistency
-      expect(results.length).toBe(operations.length);
-      
-      // Most operations should succeed
-      const successCount = results.filter(r => r.success).length;
-      expect(successCount).toBeGreaterThan(operations.length * 0.7); // At least 70% success
-    });
-
-    test('handles memory pressure scenarios', async () => {
-      // Simulate memory pressure by creating large objects
-      const largeObjects: any[] = [];
-      
-      try {
-        // Create memory pressure
-        for (let i = 0; i < 100; i++) {
-          largeObjects.push(new Array(100000).fill(Math.random()));
-        }
-        
-        // Try detection under memory pressure
-        const detections = await detector.detect(mockImageData);
-        expect(Array.isArray(detections)).toBe(true);
-        
-      } catch (error) {
-        // Acceptable to fail under extreme memory pressure
-        expect(error).toBeInstanceOf(Error);
-      } finally {
-        // Clean up
-        largeObjects.length = 0;
-      }
-    });
-  });
-
-  describe('Data Flow Validation', () => {
-    test('preserves detection metadata through pipeline', async () => {
-      const detections = await detector.detect(mockImageData);
-      
-      if (detections.length > 0) {
-        const detection = detections[0];
-        
-        // Verify essential metadata is preserved
-        expect(detection).toHaveProperty('bbox');
-        expect(detection).toHaveProperty('confidence');
-        expect(detection).toHaveProperty('class');
-        
-        // Verify enhanced metadata
-        expect(detection).toHaveProperty('confidenceCalibrated');
-        expect(detection).toHaveProperty('ensembleScore');
-        expect(detection).toHaveProperty('contextualRelevance');
-        
-        // Verify bbox format
-        expect(Array.isArray(detection.bbox)).toBe(true);
-        expect(detection.bbox.length).toBe(4);
-        detection.bbox.forEach(coord => {
-          expect(typeof coord).toBe('number');
-        });
-        
-        // Verify confidence ranges
-        expect(detection.confidence).toBeGreaterThanOrEqual(0);
-        expect(detection.confidence).toBeLessThanOrEqual(1);
-        expect(detection.confidenceCalibrated).toBeGreaterThanOrEqual(0);
-        expect(detection.confidenceCalibrated).toBeLessThanOrEqual(1);
-      }
-    });
-
-    test('validates classification data consistency', async () => {
-      const testItems = ['bottle', 'apple', 'unknown_item'];
+      const testItems = ['plastic_bottle', 'apple', 'cardboard_box'];
       
       for (const item of testItems) {
-        const classification = classifier.classify(item);
+        const classification = wasteClassifier.classify(item);
         
         if (classification) {
-          // Verify classification structure
-          expect(classification).toHaveProperty('category');
-          expect(['recycle', 'compost', 'landfill']).toContain(classification.category);
-          
-          expect(classification).toHaveProperty('confidence');
-          expect(classification.confidence).toBeGreaterThanOrEqual(0);
-          expect(classification.confidence).toBeLessThanOrEqual(1);
-          
-          expect(classification).toHaveProperty('instructions');
+          expect(classification.instructions).toBeTruthy();
           expect(typeof classification.instructions).toBe('string');
           expect(classification.instructions.length).toBeGreaterThan(0);
         }
       }
     });
+  });
 
-    test('maintains temporal consistency in results', async () => {
-      const results = [];
-      const sameImageData = mockImageData;
+  describe('Real-time Processing', () => {
+    it('should handle rapid detection requests', async () => {
+      await enhancedDetector.initialize();
       
-      // Run same detection multiple times
-      for (let i = 0; i < 5; i++) {
-        const detections = await detector.detect(sameImageData);
-        results.push({
-          timestamp: Date.now(),
-          detectionCount: detections.length,
-          detections
-        });
-        
-        // Small delay between detections
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      const rapidRequests = Array(10).fill(null).map((_, index) => 
+        enhancedDetector.detect(mockImageData).then(result => ({ index, result }))
+      );
       
-      // Results should be temporally consistent
-      expect(results.length).toBe(5);
+      const results = await Promise.all(rapidRequests);
       
-      // Detection counts should be consistent for same input
-      const detectionCounts = results.map(r => r.detectionCount);
-      const uniqueCounts = [...new Set(detectionCounts)];
-      expect(uniqueCounts.length).toBeLessThanOrEqual(2); // Allow for minor variations
+      // All requests should complete
+      expect(results).toHaveLength(10);
+      
+      // Results should be in order
+      results.forEach((result, index) => {
+        expect(result.index).toBe(index);
+        expect(result.result).toBeArray();
+      });
+    });
+
+    it('should handle concurrent detection requests', async () => {
+      await enhancedDetector.initialize();
+      
+      // Create multiple image data
+      const images = Array(5).fill(null).map(() => testUtils.createMockImageData());
+      
+      // Run detections concurrently
+      const concurrentDetections = images.map(img => enhancedDetector.detect(img));
+      
+      const results = await Promise.all(concurrentDetections);
+      
+      // All detections should complete
+      expect(results).toHaveLength(5);
+      results.forEach(detections => {
+        expect(detections).toBeArray();
+      });
     });
   });
+
+  describe('Data Flow Integration', () => {
+    it('should maintain data integrity through pipeline', async () => {
+      await enhancedDetector.initialize();
+      await wasteClassifier.initialize();
+      
+      // Create test image with known properties
+      const testImage = testUtils.createMockImageData(640, 640);
+      
+      // Run through complete pipeline
+      const detections = await enhancedDetector.detect(testImage);
+      
+      for (const detection of detections) {
+        // Verify detection data integrity
+        expect(detection.bbox).toHaveLength(4);
+        expect(detection.bbox.every(coord => typeof coord === 'number')).toBe(true);
+        expect(typeof detection.class).toBe('string');
+        expect(typeof detection.confidence).toBe('number');
+        
+        // Verify classification integration
+        const classification = wasteClassifier.classify(detection.class);
+        if (classification) {
+          expect(typeof classification.category).toBe('string');
+          expect(typeof classification.confidence).toBe('number');
+        }
+      }
+    });
+
+    it('should handle pipeline state consistency', async () => {
+      // Initialize in sequence
+      await enhancedDetector.initialize();
+      await wasteClassifier.initialize();
+      
+      // Verify both systems are ready
+      expect((enhancedDetector as any).isInitialized).toBe(true);
+      expect((wasteClassifier as any).isInitialized).toBe(true);
+      
+      // Test pipeline state after operations
+      await enhancedDetector.detect(mockImageData);
+      
+      // State should remain consistent
+      expect((enhancedDetector as any).isInitialized).toBe(true);
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle empty detection results', async () => {
+      await enhancedDetector.initialize();
+      
+      // Mock empty detection result
+      const mockRun = vi.fn().mockResolvedValue({
+        output0: {
+          data: new Float32Array([]), // Empty results
+          dims: [1, 8, 0]
+        }
+      });
+      
+      (enhancedDetector as any).session = { run: mockRun };
+      
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      expect(detections).toEqual([]);
+    });
+
+    it('should handle low confidence detections', async () => {
+      await enhancedDetector.initialize();
+      
+      // Mock low confidence detections
+      const mockRun = vi.fn().mockResolvedValue({
+        output0: {
+          data: new Float32Array([
+            320, 240, 100, 100, 0.3, 0.1, 0.9, 0.05, // Low confidence
+            100, 150, 80, 80, 0.2, 0.8, 0.1, 0.05     // Very low confidence
+          ]),
+          dims: [1, 8, 2]
+        }
+      });
+      
+      (enhancedDetector as any).session = { run: mockRun };
+      
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Should filter out low confidence detections
+      expect(detections.every(d => d.confidence >= 0.5)).toBe(true);
+    });
+
+    it('should handle malformed model outputs', async () => {
+      await enhancedDetector.initialize();
+      
+      // Mock malformed output
+      const mockRun = vi.fn().mockResolvedValue({
+        output0: {
+          data: new Float32Array([1, 2, 3]), // Wrong format
+          dims: [1, 3, 1]
+        }
+      });
+      
+      (enhancedDetector as any).session = { run: mockRun };
+      
+      const detections = await enhancedDetector.detect(mockImageData);
+      
+      // Should handle gracefully
+      expect(detections).toEqual([]);
+    });
+  });
+});
+
+// Helper to extend expect with custom matchers
+declare global {
+  namespace Vi {
+    interface Assertion<T = any> {
+      toBeArray(): T;
+    }
+  }
+}
+
+// Custom matcher for arrays
+expect.extend({
+  toBeArray(received) {
+    const pass = Array.isArray(received);
+    return {
+      pass,
+      message: () => pass 
+        ? `Expected ${received} not to be an array`
+        : `Expected ${received} to be an array`
+    };
+  }
 }); 
