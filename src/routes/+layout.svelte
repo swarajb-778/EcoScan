@@ -6,6 +6,11 @@
   import DiagnosticPanel from '$lib/components/DiagnosticPanel.svelte';
   import '../app.css';
 
+  // Create trackEvent function from enhancedAnalytics
+  const trackEvent = (name: string, category: any, properties: any = {}) => {
+    enhancedAnalytics.trackEvent(name, category, properties);
+  };
+
   let showMobileMenu = false;
   let installPrompt: any = null;
   let isInstallable = false;
