@@ -260,6 +260,14 @@
   function activateCamera() {
     isActive = true;
   }
+  
+  // Handle keyboard activation
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      activateCamera();
+    }
+  }
 </script>
 
 <div class="camera-container">
@@ -294,7 +302,7 @@
       </div>
     </div>
   {:else}
-    <div class="camera-placeholder" on:click={activateCamera} role="button" tabindex="0" aria-label="Start camera detection">
+    <div class="camera-placeholder" on:click={activateCamera} on:keydown={handleKeydown} role="button" tabindex="0" aria-label="Start camera detection">
       <div class="placeholder-content">
         <div class="camera-icon">📹</div>
         <h3>Camera Ready</h3>

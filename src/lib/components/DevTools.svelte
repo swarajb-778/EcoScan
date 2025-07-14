@@ -181,30 +181,30 @@
 		<div class="space-y-4">
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 				<div>
-					<label class="block text-sm font-medium text-gray-700 mb-2">
+					<label for="numUsers" class="block text-sm font-medium text-gray-700 mb-2">
 						Number of Users
 					</label>
 					<input
+						id="numUsers"
 						type="number"
 						bind:value={numUsers}
 						min="1"
-						max="20"
-						class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-						disabled={isRunning}
+						max="50"
+						class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 					/>
 				</div>
 				
 				<div>
-					<label class="block text-sm font-medium text-gray-700 mb-2">
+					<label for="durationSeconds" class="block text-sm font-medium text-gray-700 mb-2">
 						Duration (seconds)
 					</label>
 					<input
+						id="durationSeconds"
 						type="number"
 						bind:value={durationSeconds}
-						min="5"
+						min="10"
 						max="300"
-						class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-						disabled={isRunning}
+						class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 					/>
 				</div>
 			</div>
