@@ -2248,6 +2248,9 @@
   
   // Security
   if (!isValidImageData(capturedImage)) throw Error('Invalid data');
+  
+  // Performance tier
+  detectPerformanceTier();
 </script>
 
 <div class="camera-container">
