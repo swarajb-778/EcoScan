@@ -160,11 +160,174 @@
     showCameraSelector = !showCameraSelector;
   }
   
-  // Get camera constraints with device selection
+  // Device capability and resolution optimization
+  let deviceCapabilities = {
+    maxResolution: { width: 1920, height: 1080 },
+    supportedResolutions: [] as { width: number; height: number; label: string }[],
+    performance: 'medium' as 'low' | 'medium' | 'high',
+    hasFlash: false,
+    hasZoom: false,
+    preferredFrameRate: 30
+  };
+  
+  // Resolution options for different devices
+  const resolutionPresets = {
+    '480p': { width: 640, height: 480, label: '480p (Fast)' },
+    '720p': { width: 1280, height: 720, label: '720p (Balanced)' },
+    '1080p': { width: 1920, height: 1080, label: '1080p (Quality)' }
+  };
+  
+  // Detect device capabilities and optimal settings
+  async function detectDeviceCapabilities() {
+    if (!selectedCameraId) return;
+    
+    console.log('🔧 Detecting device capabilities...');
+    
+    try {
+      const camera = availableCameras.find(c => c.deviceId === selectedCameraId);
+      if (!camera) return;
+      
+      // Test different resolutions to find supported ones
+      const testResolutions = [
+        { width: 320, height: 240, label: '240p' },
+        { width: 640, height: 480, label: '480p' },
+        { width: 1280, height: 720, label: '720p' },
+        { width: 1920, height: 1080, label: '1080p' }
+      ];
+      
+      const supported = [];
+      
+      for (const resolution of testResolutions) {
+        try {
+          const testStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: selectedCameraId },
+              width: { exact: resolution.width },
+              height: { exact: resolution.height }
+            }
+          });
+          
+          testStream.getTracks().forEach(track => track.stop());
+          supported.push(resolution);
+          console.log(`✅ Supported: ${resolution.label}`);
+          
+        } catch (error) {
+          console.log(`❌ Not supported: ${resolution.label}`);
+        }
+      }
+      
+      deviceCapabilities.supportedResolutions = supported;
+      deviceCapabilities.maxResolution = supported[supported.length - 1] || { width: 640, height: 480 };
+      
+      // Detect device performance tier
+      const userAgent = navigator.userAgent.toLowerCase();
+      if (userAgent.includes('mobile') || userAgent.includes('android')) {
+        deviceCapabilities.performance = 'medium';
+        deviceCapabilities.preferredFrameRate = 15;
+      } else {
+        deviceCapabilities.performance = 'high';
+        deviceCapabilities.preferredFrameRate = 30;
+      }
+      
+      // Check for advanced features
+      if (typeof (navigator.mediaDevices as any).getSupportedConstraints === 'function') {
+        const constraints = (navigator.mediaDevices as any).getSupportedConstraints();
+        deviceCapabilities.hasFlash = constraints.torch || false;
+        deviceCapabilities.hasZoom = constraints.zoom || false;
+      }
+      
+      console.log('📊 Device capabilities:', deviceCapabilities);
+      
+    } catch (error) {
+      console.error('❌ Capability detection failed:', error);
+    }
+  }
+  
+  // Get optimal resolution based on device capabilities
+  function getOptimalResolution(): { width: number; height: number } {
+    const { performance, supportedResolutions } = deviceCapabilities;
+    
+    if (supportedResolutions.length === 0) {
+      return { width: 640, height: 480 }; // Safe default
+    }
+    
+    switch (performance) {
+      case 'low':
+        return supportedResolutions[0] || { width: 320, height: 240 };
+      case 'medium':
+        const midIndex = Math.floor(supportedResolutions.length / 2);
+        return supportedResolutions[midIndex] || { width: 640, height: 480 };
+      case 'high':
+        return supportedResolutions[supportedResolutions.length - 1] || { width: 1280, height: 720 };
+      default:
+        return { width: 640, height: 480 };
+    }
+  }
+  
+  // Adaptive quality adjustment
+  function adjustQualityBasedOnPerformance() {
+    const avgInferenceTime = performanceMetrics.inferenceTime;
+    const currentFPS = performanceMetrics.fps;
+    
+    // If performance is poor, reduce quality
+    if (avgInferenceTime > 200 || currentFPS < 10) {
+      console.log('📉 Poor performance detected, reducing quality...');
+      
+      const currentRes = getOptimalResolution();
+      const lowerResIndex = deviceCapabilities.supportedResolutions.findIndex(
+        r => r.width === currentRes.width && r.height === currentRes.height
+      ) - 1;
+      
+      if (lowerResIndex >= 0) {
+        const newRes = deviceCapabilities.supportedResolutions[lowerResIndex];
+        cameraConfig.width = newRes.width;
+        cameraConfig.height = newRes.height;
+        console.log(`📉 Reduced resolution to ${newRes.width}x${newRes.height}`);
+        
+        // Restart camera with new settings
+        setTimeout(() => restartCameraWithNewSettings(), 1000);
+      }
+    }
+    
+    // If performance is excellent, try higher quality
+    if (avgInferenceTime < 50 && currentFPS > 25) {
+      console.log('📈 Excellent performance, considering quality upgrade...');
+      
+      const currentRes = getOptimalResolution();
+      const higherResIndex = deviceCapabilities.supportedResolutions.findIndex(
+        r => r.width === currentRes.width && r.height === currentRes.height
+      ) + 1;
+      
+      if (higherResIndex < deviceCapabilities.supportedResolutions.length) {
+        const newRes = deviceCapabilities.supportedResolutions[higherResIndex];
+        cameraConfig.width = newRes.width;
+        cameraConfig.height = newRes.height;
+        console.log(`📈 Increased resolution to ${newRes.width}x${newRes.height}`);
+        
+        // Restart camera with new settings
+        setTimeout(() => restartCameraWithNewSettings(), 1000);
+      }
+    }
+  }
+  
+  // Restart camera with new settings
+  async function restartCameraWithNewSettings() {
+    if (streamStatus !== 'active') return;
+    
+    console.log('🔄 Restarting camera with new settings...');
+    stopCamera();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await startCamera();
+  }
+  
+  // Enhanced camera constraints with optimization
   function getCameraConstraints() {
+    const optimalRes = getOptimalResolution();
+    
     const baseConstraints = {
-      width: { ideal: cameraConfig.width },
-      height: { ideal: cameraConfig.height }
+      width: { ideal: optimalRes.width },
+      height: { ideal: optimalRes.height },
+      frameRate: { ideal: deviceCapabilities.preferredFrameRate }
     };
     
     // Use specific device if selected
@@ -335,6 +498,11 @@
       
       // Initialize camera device detection
       await initializeCameraDevices();
+      
+      // Detect device capabilities for optimization
+      if (selectedCameraId) {
+        await detectDeviceCapabilities();
+      }
       
       // Initialize reliable detector and classifier
       detector = new ObjectDetector(modelConfig);
@@ -656,6 +824,11 @@
       const inferenceTime = performance.now() - startTime;
       performanceMetrics.inferenceTime = inferenceTime;
       performanceMetrics.fps = frameCount / ((currentTime - (frameCount * 66)) / 1000);
+      
+      // Adaptive quality adjustment based on performance
+      if (frameCount % 30 === 0) { // Check every 30 frames
+        adjustQualityBasedOnPerformance();
+      }
       
       // Filter detections based on confidence threshold
       const filteredDetections = enhancedDetections.filter(d => 
