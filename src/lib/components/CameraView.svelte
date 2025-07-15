@@ -23,7 +23,12 @@
   let lastFrameTime = 0;
   let isCapturing = false;
   
-  // Add error state management
+  // Camera device management
+  let availableCameras: MediaDeviceInfo[] = [];
+  let selectedCameraId: string | null = null;
+  let showCameraSelector = false;
+  
+  // Enhanced camera error state management
   let cameraError: string | null = null;
   let permissionState: 'unknown' | 'granted' | 'denied' | 'prompt' = 'unknown';
   let retryCount = 0;
@@ -37,7 +42,7 @@
     cameraInitTime: 0
   };
   
-  // Enhanced camera configuration
+  // Enhanced camera configuration with device support
   let cameraConfig: CameraConfig = {
     facingMode: 'environment',
     width: 640,
@@ -51,6 +56,131 @@
     threshold: 0.5,
     iouThreshold: 0.4
   };
+  
+  // Detect available camera devices
+  async function detectCameraDevices(): Promise<MediaDeviceInfo[]> {
+    try {
+      console.log('🔍 Detecting camera devices...');
+      
+      // Request permission first to get device labels
+      await navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+      });
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(device => device.kind === 'videoinput');
+      
+      console.log(`📱 Found ${cameras.length} camera devices:`, cameras);
+      
+      return cameras;
+    } catch (error) {
+      console.error('❌ Camera device detection failed:', error);
+      return [];
+    }
+  }
+  
+  // Initialize camera device list
+  async function initializeCameraDevices() {
+    availableCameras = await detectCameraDevices();
+    
+    if (availableCameras.length === 0) {
+      cameraError = 'No camera devices found. Please connect a camera.';
+      return;
+    }
+    
+    // Select default camera (prefer environment camera on mobile)
+    const environmentCamera = availableCameras.find(camera => 
+      camera.label.toLowerCase().includes('back') || 
+      camera.label.toLowerCase().includes('environment')
+    );
+    
+    const frontCamera = availableCameras.find(camera => 
+      camera.label.toLowerCase().includes('front') || 
+      camera.label.toLowerCase().includes('user')
+    );
+    
+    // Prefer environment camera for waste detection
+    selectedCameraId = environmentCamera?.deviceId || frontCamera?.deviceId || availableCameras[0]?.deviceId;
+    
+    console.log(`📹 Selected camera: ${getCameraLabel(selectedCameraId)}`);
+  }
+  
+  function getCameraLabel(deviceId: string | null): string {
+    if (!deviceId) return 'Unknown Camera';
+    
+    const camera = availableCameras.find(c => c.deviceId === deviceId);
+    if (!camera) return 'Unknown Camera';
+    
+    // Clean up camera labels for better display
+    let label = camera.label || 'Camera';
+    
+    // Simplify common camera labels
+    if (label.includes('back') || label.includes('environment')) {
+      label = '📷 Back Camera';
+    } else if (label.includes('front') || label.includes('user')) {
+      label = '🤳 Front Camera';
+    } else if (label.includes('USB')) {
+      label = '🖥️ USB Camera';
+    }
+    
+    return label;
+  }
+  
+  // Enhanced camera switching with device selection
+  async function switchCamera(targetCameraId?: string) {
+    if (availableCameras.length <= 1) return;
+    
+    try {
+      console.log('🔄 Switching camera...');
+      
+      // Stop current stream
+      stopCamera();
+      
+      if (targetCameraId) {
+        selectedCameraId = targetCameraId;
+      } else {
+        // Cycle through available cameras
+        const currentIndex = availableCameras.findIndex(c => c.deviceId === selectedCameraId);
+        const nextIndex = (currentIndex + 1) % availableCameras.length;
+        selectedCameraId = availableCameras[nextIndex].deviceId;
+      }
+      
+      console.log(`📹 Switching to: ${getCameraLabel(selectedCameraId)}`);
+      
+      // Restart camera with new device
+      await startCamera();
+      
+    } catch (error) {
+      console.error('❌ Camera switch failed:', error);
+      cameraError = 'Failed to switch camera. Please try again.';
+    }
+  }
+  
+  function toggleCameraSelector() {
+    showCameraSelector = !showCameraSelector;
+  }
+  
+  // Get camera constraints with device selection
+  function getCameraConstraints() {
+    const baseConstraints = {
+      width: { ideal: cameraConfig.width },
+      height: { ideal: cameraConfig.height }
+    };
+    
+    // Use specific device if selected
+    if (selectedCameraId) {
+      return {
+        ...baseConstraints,
+        deviceId: { exact: selectedCameraId }
+      };
+    }
+    
+    // Fallback to facing mode
+    return {
+      ...baseConstraints,
+      facingMode: cameraConfig.facingMode
+    };
+  }
   
   // Check camera permissions
   async function checkCameraPermissions(): Promise<'granted' | 'denied' | 'prompt'> {
@@ -81,16 +211,11 @@
         return false;
       }
       
-      // Try to get camera access
-      const constraints = {
-        video: {
-          width: { ideal: cameraConfig.width },
-          height: { ideal: cameraConfig.height },
-          facingMode: cameraConfig.facingMode
-        }
-      };
-      
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
+             // Try to get camera access with device-specific constraints
+       const videoConstraints = getCameraConstraints();
+       const constraints = { video: videoConstraints };
+       
+       stream = await navigator.mediaDevices.getUserMedia(constraints);
       permissionState = 'granted';
       cameraError = null;
       console.log('✅ Camera permission granted');
@@ -209,6 +334,9 @@
       
       const initStartTime = performance.now();
       
+      // Initialize camera device detection
+      await initializeCameraDevices();
+      
       // Initialize reliable detector and classifier
       detector = new ObjectDetector(modelConfig);
       classifier = new WasteClassifier();
@@ -226,6 +354,7 @@
       }
     } catch (error) {
       console.error('❌ Failed to initialize camera system:', error);
+      cameraError = 'Failed to initialize camera system. Please refresh the page.';
     } finally {
       isInitializing = false;
     }
@@ -405,12 +534,6 @@
     ctx.fillText(`Threshold: ${(modelConfig.threshold * 100).toFixed(0)}%`, 15, 85);
   }
   
-  function switchCamera() {
-    cameraConfig.facingMode = cameraConfig.facingMode === 'environment' ? 'user' : 'environment';
-    stopCamera();
-    startCamera();
-  }
-  
   // Photo capture functionality
   async function capturePhoto() {
     if (!videoElement || !ctx || isCapturing) return;
@@ -544,11 +667,12 @@
       <div class="camera-controls">
         <button 
           class="control-btn switch-camera"
-          on:click={switchCamera}
+          on:click={() => switchCamera()}
+          on:click={toggleCameraSelector}
           aria-label="Switch camera"
-          disabled={isCapturing}
+          disabled={isCapturing || availableCameras.length <= 1}
         >
-          🔄
+          📷
         </button>
         
         <button 
@@ -571,6 +695,33 @@
           </span>
         </div>
       </div>
+      
+      <!-- Camera Selector -->
+      {#if showCameraSelector && availableCameras.length > 1}
+        <div class="camera-selector">
+          <div class="selector-header">
+            <h4>Select Camera</h4>
+            <button class="close-btn" on:click={toggleCameraSelector}>×</button>
+          </div>
+          <div class="camera-list">
+            {#each availableCameras as camera}
+              <button 
+                class="camera-option"
+                class:selected={camera.deviceId === selectedCameraId}
+                on:click={() => {
+                  switchCamera(camera.deviceId);
+                  toggleCameraSelector();
+                }}
+              >
+                <span class="camera-label">{getCameraLabel(camera.deviceId)}</span>
+                {#if camera.deviceId === selectedCameraId}
+                  <span class="selected-indicator">✓</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
     </div>
   {:else}
     <div class="camera-placeholder" on:click={activateCamera} on:keydown={handleKeydown} role="button" tabindex="0" aria-label="Start camera detection">
@@ -649,6 +800,86 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+  }
+  
+  .camera-selector {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    min-width: 200px;
+    z-index: 10;
+  }
+  
+  .selector-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  }
+  
+  .selector-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+  }
+  
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: #6b7280;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .close-btn:hover {
+    color: #374151;
+  }
+  
+  .camera-list {
+    padding: 8px;
+  }
+  
+  .camera-option {
+    width: 100%;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s ease;
+  }
+  
+  .camera-option:hover {
+    background: rgba(59, 130, 246, 0.1);
+  }
+  
+  .camera-option.selected {
+    background: rgba(34, 197, 94, 0.1);
+  }
+  
+  .camera-label {
+    font-size: 14px;
+    color: #374151;
+    text-align: left;
+  }
+  
+  .selected-indicator {
+    color: #22c55e;
+    font-weight: bold;
   }
   
   .control-btn {
