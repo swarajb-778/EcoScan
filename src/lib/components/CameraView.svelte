@@ -23,6 +23,12 @@
   let lastFrameTime = 0;
   let isCapturing = false;
   
+  // Add error state management
+  let cameraError: string | null = null;
+  let permissionState: 'unknown' | 'granted' | 'denied' | 'prompt' = 'unknown';
+  let retryCount = 0;
+  const MAX_RETRY_ATTEMPTS = 3;
+  
   // Performance metrics
   let performanceMetrics = {
     fps: 0,
@@ -31,7 +37,7 @@
     cameraInitTime: 0
   };
   
-  // Simplified camera configuration
+  // Enhanced camera configuration
   let cameraConfig: CameraConfig = {
     facingMode: 'environment',
     width: 640,
@@ -45,6 +51,156 @@
     threshold: 0.5,
     iouThreshold: 0.4
   };
+  
+  // Check camera permissions
+  async function checkCameraPermissions(): Promise<'granted' | 'denied' | 'prompt'> {
+    if (!navigator.permissions || !navigator.permissions.query) {
+      return 'prompt'; // Fallback for browsers without Permissions API
+    }
+    
+    try {
+      const permission = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      return permission.state as 'granted' | 'denied' | 'prompt';
+    } catch (error) {
+      console.warn('Permissions API not supported:', error);
+      return 'prompt';
+    }
+  }
+  
+  // Request camera permission with detailed error handling
+  async function requestCameraPermission(): Promise<boolean> {
+    try {
+      console.log('🔐 Requesting camera permission...');
+      
+      // Check current permission state
+      permissionState = await checkCameraPermissions();
+      console.log('Current permission state:', permissionState);
+      
+      if (permissionState === 'denied') {
+        cameraError = 'Camera access denied. Please enable camera permissions in your browser settings.';
+        return false;
+      }
+      
+      // Try to get camera access
+      const constraints = {
+        video: {
+          width: { ideal: cameraConfig.width },
+          height: { ideal: cameraConfig.height },
+          facingMode: cameraConfig.facingMode
+        }
+      };
+      
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      permissionState = 'granted';
+      cameraError = null;
+      console.log('✅ Camera permission granted');
+      return true;
+      
+    } catch (error: any) {
+      console.error('❌ Camera permission failed:', error);
+      handleCameraPermissionError(error);
+      return false;
+    }
+  }
+  
+  function handleCameraPermissionError(error: any) {
+    permissionState = 'denied';
+    retryCount++;
+    
+    switch (error.name) {
+      case 'NotAllowedError':
+        cameraError = 'Camera access denied. Please click "Allow" when prompted, or enable camera permissions in your browser settings.';
+        break;
+      case 'NotFoundError':
+        cameraError = 'No camera device found. Please connect a camera and try again.';
+        break;
+      case 'NotReadableError':
+        cameraError = 'Camera is being used by another application. Please close other camera apps and try again.';
+        break;
+      case 'OverconstrainedError':
+        cameraError = 'Camera constraints not supported. Trying with default settings...';
+        // Retry with relaxed constraints
+        if (retryCount < MAX_RETRY_ATTEMPTS) {
+          setTimeout(() => startCameraWithFallback(), 1000);
+        }
+        break;
+      case 'SecurityError':
+        cameraError = 'Camera access blocked due to security policy. Please ensure you\'re using HTTPS or localhost.';
+        break;
+      case 'AbortError':
+        cameraError = 'Camera access was interrupted. Please try again.';
+        break;
+      default:
+        cameraError = `Camera access failed: ${error.message || 'Unknown error'}. Please check your camera and try again.`;
+    }
+  }
+  
+  // Fallback camera initialization with reduced constraints
+  async function startCameraWithFallback() {
+    if (retryCount >= MAX_RETRY_ATTEMPTS) {
+      cameraError = 'Unable to access camera after multiple attempts. Please check your device settings.';
+      return;
+    }
+    
+    console.log(`🔄 Attempting camera fallback (attempt ${retryCount + 1}/${MAX_RETRY_ATTEMPTS})...`);
+    
+    const fallbackConstraints = [
+      // Try with any camera
+      { video: { facingMode: cameraConfig.facingMode } },
+      // Try with any resolution
+      { video: { width: 320, height: 240 } },
+      // Try with absolute minimal constraints
+      { video: true }
+    ];
+    
+    for (const constraints of fallbackConstraints) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        cameraError = null;
+        console.log('✅ Camera fallback successful');
+        return await completeCameraSetup();
+      } catch (error) {
+        console.warn('Fallback attempt failed:', error);
+      }
+    }
+    
+    // All fallbacks failed
+    cameraError = 'Unable to access camera with any configuration. Please check device permissions and hardware.';
+  }
+  
+  // Complete camera setup after stream is available
+  async function completeCameraSetup() {
+    if (!stream || !videoElement) return;
+    
+    try {
+      videoElement.srcObject = stream;
+      await videoElement.play();
+      
+      // Setup canvas context for detection overlay
+      ctx = canvasElement.getContext('2d')!;
+      canvasElement.width = cameraConfig.width;
+      canvasElement.height = cameraConfig.height;
+      
+      console.log('✅ Camera setup completed successfully');
+      
+      // Start detection loop
+      startDetectionLoop();
+      
+    } catch (error) {
+      console.error('❌ Camera setup failed:', error);
+      cameraError = 'Failed to initialize camera display. Please refresh the page.';
+    }
+  }
+  
+  function clearCameraError() {
+    cameraError = null;
+    retryCount = 0;
+  }
+  
+  async function retryCamera() {
+    clearCameraError();
+    await startCamera();
+  }
   
   onMount(async () => {
     try {
@@ -85,53 +241,24 @@
   
   async function startCamera() {
     try {
-      console.log('📹 Starting camera...');
+      console.log('📹 Starting camera with enhanced permission handling...');
+      clearCameraError();
       
-      // Request camera access with optimal settings
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: cameraConfig.width },
-          height: { ideal: cameraConfig.height },
-          facingMode: cameraConfig.facingMode
-        }
-      });
+      // Use enhanced permission request system
+      const permissionGranted = await requestCameraPermission();
       
-      if (!videoElement) {
-        throw new Error('Video element not available');
+      if (!permissionGranted) {
+        console.error('❌ Camera permission not granted');
+        return;
       }
       
-      videoElement.srcObject = stream;
-      await videoElement.play();
-      
-      // Setup canvas context for detection overlay
-      ctx = canvasElement.getContext('2d')!;
-      canvasElement.width = cameraConfig.width;
-      canvasElement.height = cameraConfig.height;
-      
-      console.log('✅ Camera started successfully');
-      
-      // Start detection loop
-      startDetectionLoop();
+      // Complete the camera setup
+      await completeCameraSetup();
       
     } catch (error) {
-      console.error('❌ Camera access failed:', error);
-      handleCameraError(error);
+      console.error('❌ Camera startup failed:', error);
+      handleCameraPermissionError(error);
     }
-  }
-  
-  function handleCameraError(error: any) {
-    let errorMessage = 'Camera access failed';
-    
-    if (error.name === 'NotAllowedError') {
-      errorMessage = 'Camera permission denied. Please allow camera access.';
-    } else if (error.name === 'NotFoundError') {
-      errorMessage = 'No camera found. Please connect a camera.';
-    } else if (error.name === 'NotReadableError') {
-      errorMessage = 'Camera is being used by another application.';
-    }
-    
-    console.error('Camera error:', errorMessage);
-    // You could dispatch an error event here for the parent component
   }
   
   function stopCamera() {
@@ -448,9 +575,35 @@
   {:else}
     <div class="camera-placeholder" on:click={activateCamera} on:keydown={handleKeydown} role="button" tabindex="0" aria-label="Start camera detection">
       <div class="placeholder-content">
-        <div class="camera-icon">📹</div>
-        <h3>Camera Ready</h3>
-        <p>Tap to start detecting waste items</p>
+        {#if cameraError}
+          <div class="error-state">
+            <div class="error-icon">⚠️</div>
+            <h3>Camera Issue</h3>
+            <p class="error-message">{cameraError}</p>
+            <div class="error-actions">
+              <button class="retry-btn" on:click|stopPropagation={retryCamera}>
+                🔄 Try Again
+              </button>
+              {#if permissionState === 'denied'}
+                <button class="settings-btn" on:click|stopPropagation={() => window.open('chrome://settings/content/camera', '_blank')}>
+                  ⚙️ Settings
+                </button>
+              {/if}
+            </div>
+          </div>
+        {:else if isInitializing}
+          <div class="loading-state">
+            <div class="loading-spinner">🔄</div>
+            <h3>Initializing...</h3>
+            <p>Setting up camera and AI models</p>
+          </div>
+        {:else}
+          <div class="ready-state">
+            <div class="camera-icon">📹</div>
+            <h3>Camera Ready</h3>
+            <p>Tap to start detecting waste items</p>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -592,17 +745,94 @@
   
   .placeholder-content {
     text-align: center;
+    padding: 20px;
   }
   
-  .camera-icon {
+  .ready-state .camera-icon {
     font-size: 64px;
     margin-bottom: 16px;
     animation: pulse 2s infinite;
   }
   
+  .error-state {
+    color: #ef4444;
+  }
+  
+  .error-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    animation: shake 1s ease-in-out;
+  }
+  
+  .error-message {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 16px 0;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  
+  .error-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 16px;
+  }
+  
+  .retry-btn, .settings-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .retry-btn {
+    background: #22c55e;
+    color: white;
+  }
+  
+  .retry-btn:hover {
+    background: #16a34a;
+  }
+  
+  .settings-btn {
+    background: #6b7280;
+    color: white;
+  }
+  
+  .settings-btn:hover {
+    background: #4b5563;
+  }
+  
+  .loading-state {
+    color: #3b82f6;
+  }
+  
+  .loading-spinner {
+    font-size: 48px;
+    margin-bottom: 12px;
+    animation: spin 2s linear infinite;
+  }
+  
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.7; }
+  }
+  
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
   
   .placeholder-content h3 {
