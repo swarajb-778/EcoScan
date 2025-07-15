@@ -1714,7 +1714,10 @@
       }
     }
     
-    return stabilized;
+    // Stabilize
+    stabilizedDetections = averageDetectionsOverFrames(stabilizedDetections);
+    
+    return stabilizedDetections;
   }
   
   // Stabilize individual detection
