@@ -3078,6 +3078,8 @@
     {#each capturedDetections as d}
       <div aria-live='polite'>{d.class} in {d.category}</div>
       <div>{d.class}: {d.category} - Instructions: {d.instructions || 'Dispose in ' + d.category}</div>
+      // Voice
+      speechSynthesis.speak(new SpeechSynthesisUtterance(`${d.class} to ${d.category}`));
     {/each}
   </div>
 {/if> 
