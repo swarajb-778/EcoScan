@@ -2254,6 +2254,9 @@
   
   // Fallback
   if (cameraError) showUploadInterface();
+  
+  // Keyboard
+  onKeydown={e => if (e.key === 'c') capturePhoto();}
 </script>
 
 <div class="camera-container">
