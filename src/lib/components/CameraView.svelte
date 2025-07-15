@@ -781,6 +781,20 @@
     detectFrame();
   }
   
+  // Enhanced live detection state
+  let detectionQuality: 'fast' | 'balanced' | 'accurate' = 'balanced';
+  let detectionStabilization = true;
+  let trackingHistory: Detection[][] = [];
+  let stabilizedDetections: Detection[] = [];
+  let detectionRegions: { [key: string]: number } = {};
+  
+  // Advanced frame processing
+  let frameSkipPattern = 0;
+  let adaptiveSkipping = true;
+  let lastDetectionTime = 0;
+  let detectionFrequency = 15; // Target FPS for detection
+  
+  // Enhanced detection loop with stabilization
   async function detectFrame() {
     if (!isDetecting || !videoElement || videoElement.readyState !== 4) {
       if (isDetecting) {
@@ -792,8 +806,16 @@
     const currentTime = performance.now();
     frameCount++;
     
-    // Simple frame rate limiting (aim for ~15 FPS for performance)
-    if (currentTime - lastFrameTime < 66) { // 66ms = ~15 FPS
+    // Adaptive frame rate limiting based on performance
+    const targetInterval = 1000 / detectionFrequency;
+    if (currentTime - lastFrameTime < targetInterval) {
+      animationId = requestAnimationFrame(detectFrame);
+      return;
+    }
+    
+    // Intelligent frame skipping based on performance
+    if (adaptiveSkipping && shouldSkipFrame()) {
+      lastFrameTime = currentTime;
       animationId = requestAnimationFrame(detectFrame);
       return;
     }
@@ -802,55 +824,349 @@
     const startTime = performance.now();
     
     try {
-      // Draw video frame to canvas
-      ctx.drawImage(videoElement, 0, 0, cameraConfig.width, cameraConfig.height);
-      const imageData = ctx.getImageData(0, 0, cameraConfig.width, cameraConfig.height);
+      // Clear canvas and draw current frame
+      ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
       
-      // Run detection with reliable ObjectDetector
-      const detections = await detector.detect(imageData);
+      // Get image data with optimized quality
+      const imageData = getOptimizedImageData();
       
-      // Enhance detections with classification
-      const enhancedDetections = detections.map(detection => {
-        const classification = classifier.classify(detection.class);
-        return {
-          ...detection,
-          category: classification?.category || detection.category,
-          confidence: Math.min(detection.confidence, classification?.confidence || detection.confidence),
-          instructions: classification?.instructions || detection.instructions
-        };
-      });
+      // Run detection with quality settings
+      const rawDetections = await runQualityDetection(imageData);
+      
+      // Apply detection stabilization
+      const currentDetections = detectionStabilization 
+        ? stabilizeDetections(rawDetections)
+        : rawDetections;
       
       // Update performance metrics
       const inferenceTime = performance.now() - startTime;
-      performanceMetrics.inferenceTime = inferenceTime;
-      performanceMetrics.fps = frameCount / ((currentTime - (frameCount * 66)) / 1000);
+      updatePerformanceMetrics(inferenceTime, currentTime);
       
-      // Adaptive quality adjustment based on performance
-      if (frameCount % 30 === 0) { // Check every 30 frames
-        adjustQualityBasedOnPerformance();
-      }
+      // Filter and process detections
+      const filteredDetections = filterDetections(currentDetections);
       
-      // Filter detections based on confidence threshold
-      const filteredDetections = enhancedDetections.filter(d => 
-        d.confidence >= modelConfig.threshold
-      );
+      // Update detection results
+      detectionResults = filteredDetections;
       
-      // Limit number of detections for performance
-      detectionResults = filteredDetections.slice(0, 10);
-      
-      // Draw detection visualizations
-      drawDetections(detectionResults);
+      // Enhanced drawing with smooth tracking
+      drawDetectionsWithTracking(filteredDetections);
       
       // Notify parent component
-      onDetections(detectionResults);
+      onDetections(filteredDetections);
+      
+      lastDetectionTime = currentTime;
       
     } catch (error) {
-      console.error('❌ Detection failed:', error);
+      console.error('❌ Enhanced detection failed:', error);
+      handleDetectionError(error);
     }
     
     // Continue detection loop
     if (isDetecting) {
       animationId = requestAnimationFrame(detectFrame);
+    }
+  }
+  
+  // Intelligent frame skipping logic
+  function shouldSkipFrame(): boolean {
+    const recentInferenceTime = performanceMetrics.inferenceTime;
+    const currentFPS = performanceMetrics.fps;
+    
+    // Skip more frames if performance is poor
+    if (recentInferenceTime > 150 || currentFPS < 10) {
+      frameSkipPattern = (frameSkipPattern + 1) % 3; // Skip 2 out of 3 frames
+      return frameSkipPattern !== 0;
+    }
+    
+    // Skip some frames if performance is moderate
+    if (recentInferenceTime > 100 || currentFPS < 15) {
+      frameSkipPattern = (frameSkipPattern + 1) % 2; // Skip every other frame
+      return frameSkipPattern !== 0;
+    }
+    
+    // No skipping if performance is good
+    return false;
+  }
+  
+  // Get optimized image data based on quality setting
+  function getOptimizedImageData(): ImageData {
+    const canvas = canvasElement;
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    switch (detectionQuality) {
+      case 'fast':
+        // Lower resolution for speed
+        const fastCanvas = document.createElement('canvas');
+        fastCanvas.width = width / 2;
+        fastCanvas.height = height / 2;
+        const fastCtx = fastCanvas.getContext('2d')!;
+        fastCtx.drawImage(videoElement, 0, 0, fastCanvas.width, fastCanvas.height);
+        return fastCtx.getImageData(0, 0, fastCanvas.width, fastCanvas.height);
+        
+      case 'accurate':
+        // Full resolution for accuracy
+        return ctx.getImageData(0, 0, width, height);
+        
+      case 'balanced':
+      default:
+        // Balanced resolution
+        const balancedSize = Math.min(640, Math.max(width, height));
+        const scale = balancedSize / Math.max(width, height);
+        const balancedCanvas = document.createElement('canvas');
+        balancedCanvas.width = width * scale;
+        balancedCanvas.height = height * scale;
+        const balancedCtx = balancedCanvas.getContext('2d')!;
+        balancedCtx.drawImage(videoElement, 0, 0, balancedCanvas.width, balancedCanvas.height);
+        return balancedCtx.getImageData(0, 0, balancedCanvas.width, balancedCanvas.height);
+    }
+  }
+  
+  // Quality-based detection processing
+  async function runQualityDetection(imageData: ImageData): Promise<Detection[]> {
+    if (!detector) return [];
+    
+    try {
+      const detections = await detector.detect(imageData);
+      
+      // Apply quality-specific filtering
+      const threshold = detectionQuality === 'fast' ? 0.6 : 
+                       detectionQuality === 'accurate' ? 0.4 : 0.5;
+      
+      return detections.filter(d => d.confidence >= threshold);
+    } catch (error) {
+      console.error('Quality detection failed:', error);
+      return [];
+    }
+  }
+  
+  // Detection stabilization algorithm
+  function stabilizeDetections(currentDetections: Detection[]): Detection[] {
+    // Add current detections to tracking history
+    trackingHistory.push(currentDetections);
+    
+    // Keep only recent history (last 5 frames)
+    if (trackingHistory.length > 5) {
+      trackingHistory.shift();
+    }
+    
+    // If we don't have enough history, return current detections
+    if (trackingHistory.length < 3) {
+      return currentDetections;
+    }
+    
+    // Stabilize detections by tracking consistent objects
+    const stabilized: Detection[] = [];
+    
+    for (const detection of currentDetections) {
+      const stabilizedDetection = stabilizeDetection(detection);
+      if (stabilizedDetection) {
+        stabilized.push(stabilizedDetection);
+      }
+    }
+    
+    return stabilized;
+  }
+  
+  // Stabilize individual detection
+  function stabilizeDetection(detection: Detection): Detection | null {
+    const similarDetections = trackingHistory
+      .flat()
+      .filter(d => 
+        d.class === detection.class && 
+        calculateOverlap(d.bbox, detection.bbox) > 0.3
+      );
+    
+    // Need at least 2 similar detections for stability
+    if (similarDetections.length < 2) {
+      return null;
+    }
+    
+    // Calculate stabilized properties
+    const avgConfidence = similarDetections.reduce((sum, d) => sum + d.confidence, 0) / similarDetections.length;
+    
+    // Only keep detections that are consistently detected
+    if (avgConfidence < 0.4) {
+      return null;
+    }
+    
+    // Return stabilized detection
+    return {
+      ...detection,
+      confidence: Math.min(avgConfidence, detection.confidence)
+    };
+  }
+  
+  // Calculate bounding box overlap
+  function calculateOverlap(bbox1: [number, number, number, number], bbox2: [number, number, number, number]): number {
+    const [x1, y1, w1, h1] = bbox1;
+    const [x2, y2, w2, h2] = bbox2;
+    
+    const left = Math.max(x1, x2);
+    const top = Math.max(y1, y2);
+    const right = Math.min(x1 + w1, x2 + w2);
+    const bottom = Math.min(y1 + h1, y2 + h2);
+    
+    if (left >= right || top >= bottom) return 0;
+    
+    const intersectionArea = (right - left) * (bottom - top);
+    const area1 = w1 * h1;
+    const area2 = w2 * h2;
+    const unionArea = area1 + area2 - intersectionArea;
+    
+    return intersectionArea / unionArea;
+  }
+  
+  // Enhanced detection filtering
+  function filterDetections(detections: Detection[]): Detection[] {
+    // Remove duplicate detections
+    const filtered = [];
+    const processed = new Set();
+    
+    for (const detection of detections) {
+      const key = `${detection.class}_${Math.round(detection.bbox[0])}_${Math.round(detection.bbox[1])}`;
+      if (!processed.has(key)) {
+        processed.add(key);
+        filtered.push(detection);
+      }
+    }
+    
+    // Sort by confidence
+    return filtered
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 8); // Limit to 8 detections for performance
+  }
+  
+  // Enhanced drawing with smooth tracking
+  function drawDetectionsWithTracking(detections: Detection[]) {
+    // Clear previous drawings
+    ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+    
+    // Draw detection boxes with smooth animations
+    detections.forEach((detection, index) => {
+      drawSmoothDetection(detection, index);
+    });
+    
+    // Draw performance overlay if enabled
+    if (detectionQuality === 'accurate') {
+      drawPerformanceOverlay();
+    }
+  }
+  
+  // Smooth detection drawing
+  function drawSmoothDetection(detection: Detection, index: number) {
+    const [x, y, width, height] = detection.bbox;
+    
+    // Get category color
+    const color = getCategoryColor(detection.category);
+    
+    // Draw bounding box with smooth lines
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeRect(x, y, width, height);
+    
+    // Draw label with better styling
+    const label = `${detection.class} (${(detection.confidence * 100).toFixed(0)}%)`;
+    ctx.font = '14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const textMetrics = ctx.measureText(label);
+    const labelWidth = textMetrics.width + 12;
+    const labelHeight = 24;
+    
+    // Draw label background with rounded corners
+    ctx.fillStyle = color;
+    roundRect(ctx, x, y - labelHeight, labelWidth, labelHeight, 4);
+    ctx.fill();
+    
+    // Draw label text
+    ctx.fillStyle = 'white';
+    ctx.fillText(label, x + 6, y - 6);
+    
+    // Draw category indicator
+    const categoryIcon = getCategoryIcon(detection.category);
+    ctx.font = '16px sans-serif';
+    ctx.fillText(categoryIcon, x + width - 20, y + 20);
+  }
+  
+  // Helper function for rounded rectangles
+  function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+  
+  // Get category-specific colors
+  function getCategoryColor(category: string): string {
+    switch (category) {
+      case 'recycle': return '#22c55e';
+      case 'compost': return '#84cc16';
+      case 'landfill': return '#ef4444';
+      default: return '#6b7280';
+    }
+  }
+  
+  // Get category-specific icons
+  function getCategoryIcon(category: string): string {
+    switch (category) {
+      case 'recycle': return '♻️';
+      case 'compost': return '🌱';
+      case 'landfill': return '🗑️';
+      default: return '❓';
+    }
+  }
+  
+  // Update performance metrics with smoothing
+  function updatePerformanceMetrics(inferenceTime: number, currentTime: number) {
+    // Smooth inference time
+    performanceMetrics.inferenceTime = performanceMetrics.inferenceTime * 0.8 + inferenceTime * 0.2;
+    
+    // Calculate FPS more accurately
+    const timeDelta = currentTime - lastDetectionTime;
+    if (timeDelta > 0) {
+      const instantFPS = 1000 / timeDelta;
+      performanceMetrics.fps = performanceMetrics.fps * 0.9 + instantFPS * 0.1;
+    }
+    
+    // Adaptive quality adjustment
+    if (frameCount % 30 === 0) {
+      adjustQualityBasedOnPerformance();
+      adjustDetectionFrequency();
+    }
+  }
+  
+  // Adjust detection frequency based on performance
+  function adjustDetectionFrequency() {
+    const avgInferenceTime = performanceMetrics.inferenceTime;
+    const currentFPS = performanceMetrics.fps;
+    
+    if (avgInferenceTime > 200 || currentFPS < 8) {
+      detectionFrequency = Math.max(5, detectionFrequency - 1);
+    } else if (avgInferenceTime < 50 && currentFPS > 20) {
+      detectionFrequency = Math.min(30, detectionFrequency + 1);
+    }
+  }
+  
+  // Handle detection errors gracefully
+  function handleDetectionError(error: any) {
+    console.error('Detection error details:', error);
+    
+    // Reduce quality on repeated errors
+    if (detectionQuality === 'accurate') {
+      detectionQuality = 'balanced';
+      console.log('Reduced detection quality to balanced due to errors');
+    } else if (detectionQuality === 'balanced') {
+      detectionQuality = 'fast';
+      console.log('Reduced detection quality to fast due to errors');
     }
   }
   
