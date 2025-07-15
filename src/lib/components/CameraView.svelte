@@ -1794,7 +1794,9 @@
     
     // Draw detection boxes with smooth animations
     detections.forEach((detection, index) => {
-      drawSmoothDetection(detection, index);
+      const [x, y, width, height] = detection.bbox;
+      ctx.strokeRect(x, y, width, height);
+      ctx.fillText(`${detection.class} (${detection.confidence})`, x, y);
     });
     
     // Draw performance overlay if enabled
