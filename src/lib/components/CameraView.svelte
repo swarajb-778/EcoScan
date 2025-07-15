@@ -2226,6 +2226,10 @@
   
   // Rotation
   window.addEventListener('orientationchange', () => { canvas.width = window.innerWidth; });
+  
+  // QR
+  import qrcode from 'qrcode';
+  qrcode.toDataURL(JSON.stringify(detections));
 </script>
 
 <div class="camera-container">
