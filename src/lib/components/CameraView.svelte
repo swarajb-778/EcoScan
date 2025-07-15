@@ -2223,6 +2223,9 @@
   
   // Offline capture
   if (!navigator.onLine) { useCachedDetector(); }
+  
+  // Rotation
+  window.addEventListener('orientationchange', () => { canvas.width = window.innerWidth; });
 </script>
 
 <div class="camera-container">
