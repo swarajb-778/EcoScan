@@ -1992,6 +1992,10 @@
   let captureProgress = 0;
   let showCaptureSuccess = false;
   
+  // Add capture state
+  let capturedImage: ImageData | null = null;
+  let capturedDetections: Detection[] = [];
+  
   // Enhanced photo capture with better feedback
   async function capturePhoto() {
     if (!videoElement || !ctx || isCapturing) return;
