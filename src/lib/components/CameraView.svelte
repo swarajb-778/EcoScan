@@ -391,35 +391,766 @@
     }
   }
   
+  // Advanced error handling and edge case management
+  let errorHistory: { timestamp: number; error: string; context: string }[] = [];
+  let connectionQuality: 'excellent' | 'good' | 'poor' | 'critical' = 'good';
+  let userGuidance: string | null = null;
+  let troubleshootingStep = 0;
+  let recoveryMode = false;
+  
+  // Browser compatibility detection
+  let browserCapabilities = {
+    webGL: false,
+    webAssembly: false,
+    offscreenCanvas: false,
+    mediaDevices: false,
+    speechRecognition: false,
+    notifications: false,
+    fullscreen: false
+  };
+  
+  // Device constraint monitoring
+  let deviceConstraints = {
+    memoryLimit: 0,
+    thermalState: 'normal' as 'normal' | 'fair' | 'serious' | 'critical',
+    batteryLevel: 100,
+    networkSpeed: 'fast' as 'slow' | 'medium' | 'fast'
+  };
+  
+  // Comprehensive browser and device capability detection
+  async function detectBrowserCapabilities() {
+    console.log('🔍 Detecting browser capabilities...');
+    
+    try {
+      // WebGL detection
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      browserCapabilities.webGL = !!gl;
+      
+      // WebAssembly detection
+      browserCapabilities.webAssembly = typeof WebAssembly === 'object' && typeof WebAssembly.instantiate === 'function';
+      
+      // OffscreenCanvas detection
+      browserCapabilities.offscreenCanvas = typeof OffscreenCanvas !== 'undefined';
+      
+      // MediaDevices detection
+      browserCapabilities.mediaDevices = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+      
+      // Speech recognition detection
+      browserCapabilities.speechRecognition = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+      
+      // Notifications detection
+      browserCapabilities.notifications = 'Notification' in window;
+      
+      // Fullscreen detection
+      browserCapabilities.fullscreen = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+      
+      console.log('🖥️ Browser capabilities:', browserCapabilities);
+      
+      // Show warnings for missing capabilities
+      await checkCriticalCapabilities();
+      
+    } catch (error) {
+      console.error('❌ Capability detection failed:', error);
+      logError('Capability detection failed', 'initialization', error);
+    }
+  }
+  
+  // Check for critical missing capabilities
+  async function checkCriticalCapabilities() {
+    const issues = [];
+    
+    if (!browserCapabilities.mediaDevices) {
+      issues.push('Camera access not supported in this browser');
+    }
+    
+    if (!browserCapabilities.webGL && !browserCapabilities.webAssembly) {
+      issues.push('AI acceleration not available - performance may be limited');
+    }
+    
+    if (issues.length > 0) {
+      userGuidance = issues.join('. ') + '. Consider using a modern browser like Chrome or Firefox.';
+      setTimeout(() => { userGuidance = null; }, 10000);
+    }
+  }
+  
+  // Enhanced device monitoring
+  async function monitorDeviceConstraints() {
+    try {
+      // Memory monitoring
+      if ('memory' in performance) {
+        const memory = (performance as any).memory;
+        deviceConstraints.memoryLimit = memory.usedJSHeapSize / memory.jsHeapSizeLimit;
+        
+        if (deviceConstraints.memoryLimit > 0.8) {
+          handleMemoryPressure();
+        }
+      }
+      
+      // Battery monitoring
+      if ('getBattery' in navigator) {
+        const battery = await (navigator as any).getBattery();
+        deviceConstraints.batteryLevel = battery.level * 100;
+        
+        if (deviceConstraints.batteryLevel < 15) {
+          handleLowBattery();
+        }
+      }
+      
+      // Network monitoring
+      if ('connection' in navigator) {
+        const connection = (navigator as any).connection;
+        const speed = connection.effectiveType;
+        deviceConstraints.networkSpeed = speed === '4g' ? 'fast' : speed === '3g' ? 'medium' : 'slow';
+      }
+      
+      // Thermal state monitoring (iOS)
+      if ('webkitTemperature' in navigator) {
+        deviceConstraints.thermalState = (navigator as any).webkitTemperature || 'normal';
+        
+        if (deviceConstraints.thermalState === 'critical') {
+          handleThermalThrottling();
+        }
+      }
+      
+    } catch (error) {
+      console.warn('Device constraint monitoring failed:', error);
+    }
+  }
+  
+  // Enhanced error logging system
+  function logError(error: string, context: string, details?: any) {
+    const errorEntry = {
+      timestamp: Date.now(),
+      error,
+      context,
+      details: details?.message || details
+    };
+    
+    errorHistory.push(errorEntry);
+    
+    // Keep only recent errors (last 50)
+    if (errorHistory.length > 50) {
+      errorHistory.shift();
+    }
+    
+    // Analyze error patterns
+    analyzeErrorPatterns();
+    
+    console.error(`[${context}] ${error}`, details);
+  }
+  
+  // Error pattern analysis
+  function analyzeErrorPatterns() {
+    const recentErrors = errorHistory.slice(-10);
+    const errorCounts = recentErrors.reduce((acc, err) => {
+      acc[err.context] = (acc[err.context] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    // If we have recurring errors, suggest solutions
+    for (const [context, count] of Object.entries(errorCounts)) {
+      if (count >= 3) {
+        provideTroubleshootingGuidance(context);
+      }
+    }
+  }
+  
+  // Troubleshooting guidance system
+  function provideTroubleshootingGuidance(context: string) {
+    const guidance = {
+      'camera': [
+        'Check if another app is using the camera',
+        'Try refreshing the page',
+        'Check browser permissions for camera access',
+        'Try switching to a different camera if available'
+      ],
+      'detection': [
+        'Ensure good lighting conditions',
+        'Clean the camera lens',
+        'Try reducing the detection quality',
+        'Move objects closer to the camera'
+      ],
+      'performance': [
+        'Close other browser tabs',
+        'Try reducing the camera resolution',
+        'Switch to fast detection mode',
+        'Restart the browser'
+      ],
+      'network': [
+        'Check your internet connection',
+        'Try refreshing the page',
+        'Switch to a different network if available',
+        'Clear browser cache and cookies'
+      ]
+    };
+    
+    const steps = guidance[context as keyof typeof guidance];
+    if (steps && troubleshootingStep < steps.length) {
+      userGuidance = `Troubleshooting: ${steps[troubleshootingStep]}`;
+      troubleshootingStep++;
+      
+      setTimeout(() => {
+        if (troubleshootingStep >= steps.length) {
+          troubleshootingStep = 0;
+        }
+        userGuidance = null;
+      }, 8000);
+    }
+  }
+  
+  // Memory pressure handling
+  function handleMemoryPressure() {
+    console.warn('⚠️ Memory pressure detected, optimizing...');
+    
+    // Reduce detection quality
+    if (detectionQuality === 'accurate') {
+      detectionQuality = 'balanced';
+    } else if (detectionQuality === 'balanced') {
+      detectionQuality = 'fast';
+    }
+    
+    // Reduce tracking history
+    trackingHistory = trackingHistory.slice(-2);
+    
+    // Clear capture history
+    if (captureHistory.length > 3) {
+      captureHistory = captureHistory.slice(-3);
+    }
+    
+    userGuidance = 'Optimizing for low memory. Close other browser tabs for better performance.';
+    setTimeout(() => { userGuidance = null; }, 5000);
+  }
+  
+  // Low battery handling
+  function handleLowBattery() {
+    console.warn('🔋 Low battery detected, reducing power consumption...');
+    
+    // Reduce detection frequency
+    detectionFrequency = Math.max(5, detectionFrequency / 2);
+    
+    // Switch to fast mode
+    detectionQuality = 'fast';
+    
+    userGuidance = 'Battery low. Switching to power-saving mode.';
+    setTimeout(() => { userGuidance = null; }, 5000);
+  }
+  
+  // Thermal throttling handling
+  function handleThermalThrottling() {
+    console.warn('🌡️ Device overheating, reducing performance...');
+    
+    // Significantly reduce performance
+    detectionFrequency = 5;
+    detectionQuality = 'fast';
+    
+    // Stop detection temporarily
+    isDetecting = false;
+    
+    userGuidance = 'Device overheating. Please let it cool down before continuing.';
+    
+    // Resume detection after cooling period
+    setTimeout(() => {
+      if (deviceConstraints.thermalState !== 'critical') {
+        isDetecting = true;
+        detectFrame();
+        userGuidance = null;
+      }
+    }, 30000);
+  }
+  
+  // Enhanced camera error handling with specific solutions
   function handleCameraPermissionError(error: any) {
     permissionState = 'denied';
     retryCount++;
     
-    switch (error.name) {
-      case 'NotAllowedError':
-        cameraError = 'Camera access denied. Please click "Allow" when prompted, or enable camera permissions in your browser settings.';
-        break;
-      case 'NotFoundError':
-        cameraError = 'No camera device found. Please connect a camera and try again.';
-        break;
-      case 'NotReadableError':
-        cameraError = 'Camera is being used by another application. Please close other camera apps and try again.';
-        break;
-      case 'OverconstrainedError':
-        cameraError = 'Camera constraints not supported. Trying with default settings...';
-        // Retry with relaxed constraints
-        if (retryCount < MAX_RETRY_ATTEMPTS) {
-          setTimeout(() => startCameraWithFallback(), 1000);
+    const errorSolutions = {
+      'NotAllowedError': {
+        message: 'Camera access denied',
+        solutions: [
+          'Click "Allow" when prompted for camera access',
+          'Check browser settings: Chrome → Privacy → Camera',
+          'Reload the page and try again',
+          'Check if another app is using the camera'
+        ]
+      },
+      'NotFoundError': {
+        message: 'No camera device found',
+        solutions: [
+          'Connect a camera to your device',
+          'Check camera drivers and hardware',
+          'Try a different USB port',
+          'Restart your device'
+        ]
+      },
+      'NotReadableError': {
+        message: 'Camera busy or hardware error',
+        solutions: [
+          'Close other apps using the camera',
+          'Unplug and reconnect USB camera',
+          'Restart the browser',
+          'Check camera hardware connections'
+        ]
+      },
+      'OverconstrainedError': {
+        message: 'Camera settings not supported',
+        solutions: [
+          'Try a different camera resolution',
+          'Use a different camera if available',
+          'Update camera drivers',
+          'Try basic camera settings'
+        ]
+      },
+      'SecurityError': {
+        message: 'Security policy blocks camera access',
+        solutions: [
+          'Use HTTPS instead of HTTP',
+          'Try localhost for development',
+          'Check browser security settings',
+          'Disable strict security extensions'
+        ]
+      }
+    };
+    
+    const errorInfo = errorSolutions[error.name as keyof typeof errorSolutions] || {
+      message: 'Camera error occurred',
+      solutions: ['Refresh the page and try again', 'Check browser console for details']
+    };
+    
+    cameraError = errorInfo.message;
+    logError(errorInfo.message, 'camera', error);
+    
+    // Provide progressive solutions
+    if (retryCount <= errorInfo.solutions.length) {
+      userGuidance = `Solution ${retryCount}: ${errorInfo.solutions[retryCount - 1]}`;
+      setTimeout(() => { userGuidance = null; }, 10000);
+    }
+    
+    // Auto-retry with fallback constraints
+    if (retryCount < MAX_RETRY_ATTEMPTS) {
+      setTimeout(() => startCameraWithFallback(), 2000 * retryCount);
+    }
+  }
+  
+  // Recovery mode for persistent issues
+  async function enableRecoveryMode() {
+    console.log('🔧 Enabling recovery mode...');
+    recoveryMode = true;
+    
+    // Reset all settings to safe defaults
+    detectionQuality = 'fast';
+    detectionFrequency = 10;
+    detectionStabilization = false;
+    adaptiveSkipping = false;
+    
+    // Clear problematic state
+    trackingHistory = [];
+    captureHistory = [];
+    errorHistory = [];
+    
+    // Restart with minimal settings
+    stopCamera();
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    try {
+      await startCamera();
+      userGuidance = 'Recovery mode enabled. Basic functionality restored.';
+      setTimeout(() => { userGuidance = null; }, 5000);
+    } catch (error) {
+      cameraError = 'Recovery failed. Please refresh the page and try again.';
+      logError('Recovery mode failed', 'recovery', error);
+    }
+  }
+  
+  // Network quality monitoring
+  function monitorConnectionQuality() {
+    const start = performance.now();
+    
+    // Test with a small request
+    fetch('/models/ort.all.min.mjs', { method: 'HEAD' })
+      .then(() => {
+        const latency = performance.now() - start;
+        if (latency < 100) {
+          connectionQuality = 'excellent';
+        } else if (latency < 300) {
+          connectionQuality = 'good';
+        } else if (latency < 1000) {
+          connectionQuality = 'poor';
+        } else {
+          connectionQuality = 'critical';
         }
-        break;
-      case 'SecurityError':
-        cameraError = 'Camera access blocked due to security policy. Please ensure you\'re using HTTPS or localhost.';
-        break;
-      case 'AbortError':
-        cameraError = 'Camera access was interrupted. Please try again.';
-        break;
+      })
+      .catch(() => {
+        connectionQuality = 'critical';
+        logError('Network connectivity issues', 'network', 'Failed to reach server');
+      });
+  }
+  
+  // Accessibility error handling
+  function handleAccessibilityIssues() {
+    // Keyboard navigation support
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && showCapturePreview) {
+        showCapturePreview = false;
+      }
+      
+      if (event.key === 'Enter' && document.activeElement?.classList.contains('camera-placeholder')) {
+        activateCamera();
+      }
+    });
+    
+    // Screen reader announcements
+    if ('speechSynthesis' in window) {
+      // Announce important state changes
+      const announceStateChange = (message: string) => {
+        const utterance = new SpeechSynthesisUtterance(message);
+        utterance.volume = 0.5;
+        speechSynthesis.speak(utterance);
+      };
+      
+      // Announce when camera starts
+      if (streamStatus === 'active') {
+        announceStateChange('Camera activated and ready for detection');
+      }
+      
+      // Announce detection results
+      if (detectionResults.length > 0) {
+        announceStateChange(`${detectionResults.length} items detected`);
+      }
+    }
+  }
+  
+  // Detect available camera devices
+  async function detectCameraDevices(): Promise<MediaDeviceInfo[]> {
+    try {
+      console.log('🔍 Detecting camera devices...');
+      
+      // Request permission first to get device labels
+      await navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+      });
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(device => device.kind === 'videoinput');
+      
+      console.log(`📱 Found ${cameras.length} camera devices:`, cameras);
+      
+      return cameras;
+    } catch (error) {
+      console.error('❌ Camera device detection failed:', error);
+      return [];
+    }
+  }
+  
+  // Initialize camera device list
+  async function initializeCameraDevices() {
+    availableCameras = await detectCameraDevices();
+    
+    if (availableCameras.length === 0) {
+      cameraError = 'No camera devices found. Please connect a camera.';
+      return;
+    }
+    
+    // Select default camera (prefer environment camera on mobile)
+    const environmentCamera = availableCameras.find(camera => 
+      camera.label.toLowerCase().includes('back') || 
+      camera.label.toLowerCase().includes('environment')
+    );
+    
+    const frontCamera = availableCameras.find(camera => 
+      camera.label.toLowerCase().includes('front') || 
+      camera.label.toLowerCase().includes('user')
+    );
+    
+    // Prefer environment camera for waste detection
+    selectedCameraId = environmentCamera?.deviceId || frontCamera?.deviceId || availableCameras[0]?.deviceId;
+    
+    console.log(`📹 Selected camera: ${getCameraLabel(selectedCameraId)}`);
+  }
+  
+  function getCameraLabel(deviceId: string | null): string {
+    if (!deviceId) return 'Unknown Camera';
+    
+    const camera = availableCameras.find(c => c.deviceId === deviceId);
+    if (!camera) return 'Unknown Camera';
+    
+    // Clean up camera labels for better display
+    let label = camera.label || 'Camera';
+    
+    // Simplify common camera labels
+    if (label.includes('back') || label.includes('environment')) {
+      label = '📷 Back Camera';
+    } else if (label.includes('front') || label.includes('user')) {
+      label = '🤳 Front Camera';
+    } else if (label.includes('USB')) {
+      label = '🖥️ USB Camera';
+    }
+    
+    return label;
+  }
+  
+  // Enhanced camera switching with device selection
+  async function switchCamera(targetCameraId?: string) {
+    if (availableCameras.length <= 1) return;
+    
+    try {
+      console.log('🔄 Switching camera...');
+      
+      // Stop current stream
+      stopCamera();
+      
+      if (targetCameraId) {
+        selectedCameraId = targetCameraId;
+      } else {
+        // Cycle through available cameras
+        const currentIndex = availableCameras.findIndex(c => c.deviceId === selectedCameraId);
+        const nextIndex = (currentIndex + 1) % availableCameras.length;
+        selectedCameraId = availableCameras[nextIndex].deviceId;
+      }
+      
+      console.log(`📹 Switching to: ${getCameraLabel(selectedCameraId)}`);
+      
+      // Restart camera with new device
+      await startCamera();
+      
+    } catch (error) {
+      console.error('❌ Camera switch failed:', error);
+      cameraError = 'Failed to switch camera. Please try again.';
+    }
+  }
+  
+  function toggleCameraSelector() {
+    showCameraSelector = !showCameraSelector;
+  }
+  
+  // Device capability and resolution optimization
+  let deviceCapabilities = {
+    maxResolution: { width: 1920, height: 1080 },
+    supportedResolutions: [] as { width: number; height: number; label: string }[],
+    performance: 'medium' as 'low' | 'medium' | 'high',
+    hasFlash: false,
+    hasZoom: false,
+    preferredFrameRate: 30
+  };
+  
+  // Resolution options for different devices
+  const resolutionPresets = {
+    '480p': { width: 640, height: 480, label: '480p (Fast)' },
+    '720p': { width: 1280, height: 720, label: '720p (Balanced)' },
+    '1080p': { width: 1920, height: 1080, label: '1080p (Quality)' }
+  };
+  
+  // Detect device capabilities and optimal settings
+  async function detectDeviceCapabilities() {
+    if (!selectedCameraId) return;
+    
+    console.log('🔧 Detecting device capabilities...');
+    
+    try {
+      const camera = availableCameras.find(c => c.deviceId === selectedCameraId);
+      if (!camera) return;
+      
+      // Test different resolutions to find supported ones
+      const testResolutions = [
+        { width: 320, height: 240, label: '240p' },
+        { width: 640, height: 480, label: '480p' },
+        { width: 1280, height: 720, label: '720p' },
+        { width: 1920, height: 1080, label: '1080p' }
+      ];
+      
+      const supported = [];
+      
+      for (const resolution of testResolutions) {
+        try {
+          const testStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: selectedCameraId },
+              width: { exact: resolution.width },
+              height: { exact: resolution.height }
+            }
+          });
+          
+          testStream.getTracks().forEach(track => track.stop());
+          supported.push(resolution);
+          console.log(`✅ Supported: ${resolution.label}`);
+          
+        } catch (error) {
+          console.log(`❌ Not supported: ${resolution.label}`);
+        }
+      }
+      
+      deviceCapabilities.supportedResolutions = supported;
+      deviceCapabilities.maxResolution = supported[supported.length - 1] || { width: 640, height: 480 };
+      
+      // Detect device performance tier
+      const userAgent = navigator.userAgent.toLowerCase();
+      if (userAgent.includes('mobile') || userAgent.includes('android')) {
+        deviceCapabilities.performance = 'medium';
+        deviceCapabilities.preferredFrameRate = 15;
+      } else {
+        deviceCapabilities.performance = 'high';
+        deviceCapabilities.preferredFrameRate = 30;
+      }
+      
+      // Check for advanced features
+      if (typeof (navigator.mediaDevices as any).getSupportedConstraints === 'function') {
+        const constraints = (navigator.mediaDevices as any).getSupportedConstraints();
+        deviceCapabilities.hasFlash = constraints.torch || false;
+        deviceCapabilities.hasZoom = constraints.zoom || false;
+      }
+      
+      console.log('📊 Device capabilities:', deviceCapabilities);
+      
+    } catch (error) {
+      console.error('❌ Capability detection failed:', error);
+    }
+  }
+  
+  // Get optimal resolution based on device capabilities
+  function getOptimalResolution(): { width: number; height: number } {
+    const { performance, supportedResolutions } = deviceCapabilities;
+    
+    if (supportedResolutions.length === 0) {
+      return { width: 640, height: 480 }; // Safe default
+    }
+    
+    switch (performance) {
+      case 'low':
+        return supportedResolutions[0] || { width: 320, height: 240 };
+      case 'medium':
+        const midIndex = Math.floor(supportedResolutions.length / 2);
+        return supportedResolutions[midIndex] || { width: 640, height: 480 };
+      case 'high':
+        return supportedResolutions[supportedResolutions.length - 1] || { width: 1280, height: 720 };
       default:
-        cameraError = `Camera access failed: ${error.message || 'Unknown error'}. Please check your camera and try again.`;
+        return { width: 640, height: 480 };
+    }
+  }
+  
+  // Adaptive quality adjustment
+  function adjustQualityBasedOnPerformance() {
+    const avgInferenceTime = performanceMetrics.inferenceTime;
+    const currentFPS = performanceMetrics.fps;
+    
+    // If performance is poor, reduce quality
+    if (avgInferenceTime > 200 || currentFPS < 10) {
+      console.log('📉 Poor performance detected, reducing quality...');
+      
+      const currentRes = getOptimalResolution();
+      const lowerResIndex = deviceCapabilities.supportedResolutions.findIndex(
+        r => r.width === currentRes.width && r.height === currentRes.height
+      ) - 1;
+      
+      if (lowerResIndex >= 0) {
+        const newRes = deviceCapabilities.supportedResolutions[lowerResIndex];
+        cameraConfig.width = newRes.width;
+        cameraConfig.height = newRes.height;
+        console.log(`📉 Reduced resolution to ${newRes.width}x${newRes.height}`);
+        
+        // Restart camera with new settings
+        setTimeout(() => restartCameraWithNewSettings(), 1000);
+      }
+    }
+    
+    // If performance is excellent, try higher quality
+    if (avgInferenceTime < 50 && currentFPS > 25) {
+      console.log('📈 Excellent performance, considering quality upgrade...');
+      
+      const currentRes = getOptimalResolution();
+      const higherResIndex = deviceCapabilities.supportedResolutions.findIndex(
+        r => r.width === currentRes.width && r.height === currentRes.height
+      ) + 1;
+      
+      if (higherResIndex < deviceCapabilities.supportedResolutions.length) {
+        const newRes = deviceCapabilities.supportedResolutions[higherResIndex];
+        cameraConfig.width = newRes.width;
+        cameraConfig.height = newRes.height;
+        console.log(`📈 Increased resolution to ${newRes.width}x${newRes.height}`);
+        
+        // Restart camera with new settings
+        setTimeout(() => restartCameraWithNewSettings(), 1000);
+      }
+    }
+  }
+  
+  // Restart camera with new settings
+  async function restartCameraWithNewSettings() {
+    if (streamStatus !== 'active') return;
+    
+    console.log('🔄 Restarting camera with new settings...');
+    stopCamera();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await startCamera();
+  }
+  
+  // Enhanced camera constraints with optimization
+  function getCameraConstraints() {
+    const optimalRes = getOptimalResolution();
+    
+    const baseConstraints = {
+      width: { ideal: optimalRes.width },
+      height: { ideal: optimalRes.height },
+      frameRate: { ideal: deviceCapabilities.preferredFrameRate }
+    };
+    
+    // Use specific device if selected
+    if (selectedCameraId) {
+      return {
+        ...baseConstraints,
+        deviceId: { exact: selectedCameraId }
+      };
+    }
+    
+    // Fallback to facing mode
+    return {
+      ...baseConstraints,
+      facingMode: cameraConfig.facingMode
+    };
+  }
+  
+  // Check camera permissions
+  async function checkCameraPermissions(): Promise<'granted' | 'denied' | 'prompt'> {
+    if (!navigator.permissions || !navigator.permissions.query) {
+      return 'prompt'; // Fallback for browsers without Permissions API
+    }
+    
+    try {
+      const permission = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      return permission.state as 'granted' | 'denied' | 'prompt';
+    } catch (error) {
+      console.warn('Permissions API not supported:', error);
+      return 'prompt';
+    }
+  }
+  
+  // Request camera permission with detailed error handling
+  async function requestCameraPermission(): Promise<boolean> {
+    try {
+      console.log('🔐 Requesting camera permission...');
+      
+      // Check current permission state
+      permissionState = await checkCameraPermissions();
+      console.log('Current permission state:', permissionState);
+      
+      if (permissionState === 'denied') {
+        cameraError = 'Camera access denied. Please enable camera permissions in your browser settings.';
+        return false;
+      }
+      
+             // Try to get camera access with device-specific constraints
+       const videoConstraints = getCameraConstraints();
+       const constraints = { video: videoConstraints };
+       
+       stream = await navigator.mediaDevices.getUserMedia(constraints);
+      permissionState = 'granted';
+      cameraError = null;
+      console.log('✅ Camera permission granted');
+      return true;
+      
+    } catch (error: any) {
+      console.error('❌ Camera permission failed:', error);
+      handleCameraPermissionError(error);
+      return false;
     }
   }
   
