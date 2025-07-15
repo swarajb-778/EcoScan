@@ -1220,12 +1220,17 @@
     await startCamera();
   }
   
+      // Initialize all monitoring systems
   onMount(async () => {
     try {
       isInitializing = true;
-      console.log('🎥 Initializing camera system...');
+      console.log('🎥 Initializing comprehensive camera system...');
       
       const initStartTime = performance.now();
+      
+      // Initialize browser and device capability detection
+      await detectBrowserCapabilities();
+      await monitorDeviceConstraints();
       
       // Initialize camera device detection
       await initializeCameraDevices();
@@ -1244,15 +1249,27 @@
         classifier.initialize()
       ]);
       
+      // Setup monitoring systems
+      monitorConnectionQuality();
+      handleAccessibilityIssues();
+      
+      // Schedule periodic health checks
+      setInterval(monitorDeviceConstraints, 30000); // Every 30 seconds
+      setInterval(monitorConnectionQuality, 60000); // Every minute
+      
       performanceMetrics.cameraInitTime = performance.now() - initStartTime;
-      console.log(`✅ Camera system initialized in ${performanceMetrics.cameraInitTime.toFixed(1)}ms`);
+      console.log(`✅ Comprehensive camera system initialized in ${performanceMetrics.cameraInitTime.toFixed(1)}ms`);
       
       if (isActive) {
         await startCamera();
       }
     } catch (error) {
       console.error('❌ Failed to initialize camera system:', error);
+      logError('Failed to initialize camera system', 'initialization', error);
       cameraError = 'Failed to initialize camera system. Please refresh the page.';
+      
+      // Try recovery mode if initialization fails
+      setTimeout(() => enableRecoveryMode(), 3000);
     } finally {
       isInitializing = false;
     }
@@ -2668,6 +2685,51 @@
     background: #dc2626;
   }
   
+  .guidance-overlay {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    max-width: 90%;
+    width: 400px;
+  }
+  
+  .guidance-content {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: white;
+    padding: 16px 20px;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: slideDown 0.3s ease-out;
+  }
+  
+  .guidance-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+  
+  .guidance-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.4;
+    font-weight: 500;
+  }
+  
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
   .control-btn {
     width: 48px;
     height: 48px;
@@ -2927,6 +2989,16 @@
           </button>
         </div>
       </div>
+    </div>
+  </div>
+{/if}
+
+<!-- User Guidance Overlay -->
+{#if userGuidance}
+  <div class="guidance-overlay">
+    <div class="guidance-content">
+      <div class="guidance-icon">💡</div>
+      <p class="guidance-text">{userGuidance}</p>
     </div>
   </div>
 {/if} 
