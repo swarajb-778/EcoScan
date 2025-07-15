@@ -2236,6 +2236,9 @@
   
   // Debounce
   if (highMotion) skipDetection();
+  
+  // Local storage
+  localStorage.setItem('classifications', JSON.stringify(detections));
 </script>
 
 <div class="camera-container">
