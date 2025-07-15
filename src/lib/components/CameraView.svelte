@@ -2220,6 +2220,9 @@
   // Blurry check
   function isBlurry(data) { /* variance calc */ }
   if (isBlurry(capturedImage)) alert('Blurry - hold steady');
+  
+  // Offline capture
+  if (!navigator.onLine) { useCachedDetector(); }
 </script>
 
 <div class="camera-container">
