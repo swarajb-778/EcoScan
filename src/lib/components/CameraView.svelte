@@ -3051,6 +3051,10 @@
 {/if> 
 
 <!-- Add results modal -->
-{#if capturedDetections}
-  <div>Results: {capturedDetections.map(d => `${d.class}: ${d.category}`).join(', ')}</div>
+{#if capturedDetections.length > 0}
+  <div class='results-modal'>
+    {#each capturedDetections as d}
+      <div>{d.class}: {d.category} - Instructions: {d.instructions || 'Dispose in ' + d.category}</div>
+    {/each}
+  </div>
 {/if> 
