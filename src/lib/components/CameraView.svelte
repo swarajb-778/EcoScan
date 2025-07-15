@@ -917,90 +917,153 @@
     ctx.fillText(`Threshold: ${(modelConfig.threshold * 100).toFixed(0)}%`, 15, 85);
   }
   
-  // Photo capture functionality
+  // Enhanced photo capture state
+  let captureHistory: { id: string; timestamp: number; imageData: ImageData; detections: Detection[] }[] = [];
+  let showCapturePreview = false;
+  let lastCapturedPhoto: { imageData: ImageData; detections: Detection[] } | null = null;
+  let captureCount = 0;
+  
+  // Visual feedback state
+  let flashEffect = false;
+  let captureProgress = 0;
+  let showCaptureSuccess = false;
+  
+  // Enhanced photo capture with better feedback
   async function capturePhoto() {
     if (!videoElement || !ctx || isCapturing) return;
     
     isCapturing = true;
-    console.log('📸 Capturing photo...');
+    captureProgress = 0;
+    console.log('📸 Capturing photo with enhanced feedback...');
     
     try {
+      // Visual flash effect
+      flashEffect = true;
+      setTimeout(() => { flashEffect = false; }, 200);
+      
+      // Progress simulation for better UX
+      const progressInterval = setInterval(() => {
+        captureProgress += 20;
+        if (captureProgress >= 100) {
+          clearInterval(progressInterval);
+        }
+      }, 50);
+      
       // Create capture canvas for photo analysis
       if (!captureCanvas) {
         captureCanvas = document.createElement('canvas');
       }
       
-      captureCanvas.width = cameraConfig.width;
-      captureCanvas.height = cameraConfig.height;
+      captureCanvas.width = videoElement.videoWidth || cameraConfig.width;
+      captureCanvas.height = videoElement.videoHeight || cameraConfig.height;
       const captureCtx = captureCanvas.getContext('2d')!;
       
-      // Capture current video frame
-      captureCtx.drawImage(videoElement, 0, 0, cameraConfig.width, cameraConfig.height);
-      const capturedImageData = captureCtx.getImageData(0, 0, cameraConfig.width, cameraConfig.height);
+      // Capture current video frame with high quality
+      captureCtx.drawImage(videoElement, 0, 0, captureCanvas.width, captureCanvas.height);
+      const capturedImageData = captureCtx.getImageData(0, 0, captureCanvas.width, captureCanvas.height);
       
       // Stop live detection temporarily
       const wasDetecting = isDetecting;
       isDetecting = false;
       
-      // Analyze the captured photo
-      await analyzePhoto(capturedImageData);
+      // Analyze the captured photo with progress tracking
+      captureProgress = 50;
+      const analysisResults = await analyzePhoto(capturedImageData);
+      
+      // Create capture record
+      const captureRecord = {
+        id: `capture_${Date.now()}_${captureCount++}`,
+        timestamp: Date.now(),
+        imageData: capturedImageData,
+        detections: analysisResults
+      };
+      
+      // Add to history (keep last 10)
+      captureHistory = [captureRecord, ...captureHistory.slice(0, 9)];
+      lastCapturedPhoto = { imageData: capturedImageData, detections: analysisResults };
+      
+      captureProgress = 100;
+      
+      // Show success feedback
+      showCaptureSuccess = true;
+      setTimeout(() => { showCaptureSuccess = false; }, 2000);
       
       // Notify parent component
       onCapturePhoto(capturedImageData);
       
-      // Resume live detection if it was running
+      // Resume live detection after brief pause
       if (wasDetecting) {
         setTimeout(() => {
           isDetecting = true;
           detectFrame();
-        }, 1000); // Brief pause to show capture effect
+        }, 1500);
       }
       
-      console.log('✅ Photo captured and analyzed');
+      console.log(`✅ Photo captured and analyzed - ${analysisResults.length} items found`);
       
     } catch (error) {
       console.error('❌ Photo capture failed:', error);
+      cameraError = 'Photo capture failed. Please try again.';
     } finally {
       isCapturing = false;
+      captureProgress = 0;
     }
   }
   
-  async function analyzePhoto(imageData: ImageData) {
-    if (!detector || !classifier) return;
+  // Enhanced photo analysis with better results
+  async function analyzePhoto(imageData: ImageData): Promise<Detection[]> {
+    if (!detector || !classifier) return [];
     
-    console.log('🔍 Analyzing captured photo...');
+    console.log('🔍 Analyzing captured photo with enhanced detection...');
     const startTime = performance.now();
     
     try {
-      // Run detection on captured image
+      // Run detection with higher quality settings for static images
       const detections = await detector.detect(imageData);
       
+      // Enhanced detection filtering for photos (can be more thorough)
+      const photoDetections = detections.filter(d => d.confidence >= 0.3); // Lower threshold for photos
+      
       // Enhance detections with classification
-      const enhancedDetections = detections.map(detection => {
+      const enhancedDetections = photoDetections.map(detection => {
         const classification = classifier.classify(detection.class);
         return {
           ...detection,
           category: classification?.category || detection.category,
           confidence: Math.min(detection.confidence, classification?.confidence || detection.confidence),
-          instructions: classification?.instructions || detection.instructions
+          instructions: classification?.instructions || detection.instructions || 'No specific disposal instructions available'
         };
       });
       
       const analysisTime = performance.now() - startTime;
       console.log(`✅ Photo analysis complete in ${analysisTime.toFixed(1)}ms - Found ${enhancedDetections.length} items`);
       
-      // Update detection results with photo analysis
-      detectionResults = enhancedDetections.filter(d => d.confidence >= modelConfig.threshold);
-      
-      // Draw results on camera overlay
-      drawDetections(detectionResults);
-      
-      // Notify parent with results
-      onDetections(detectionResults);
+      return enhancedDetections;
       
     } catch (error) {
       console.error('❌ Photo analysis failed:', error);
+      return [];
     }
+  }
+  
+  // Show capture preview modal
+  function showCaptureDetails() {
+    if (lastCapturedPhoto) {
+      showCapturePreview = true;
+    }
+  }
+  
+  // Clear capture history
+  function clearCaptureHistory() {
+    captureHistory = [];
+    lastCapturedPhoto = null;
+    showCapturePreview = false;
+  }
+  
+  // Retake photo
+  async function retakePhoto() {
+    showCapturePreview = false;
+    await capturePhoto();
   }
   
   // Update performance metrics periodically
@@ -1047,6 +1110,31 @@
         class="detection-overlay"
       />
       
+      <!-- Visual feedback overlays -->
+      {#if flashEffect}
+        <div class="flash-overlay"></div>
+      {/if}
+      
+      {#if isCapturing}
+        <div class="capture-overlay">
+          <div class="capture-indicator">
+            <div class="progress-ring">
+              <div class="progress-fill" style="--progress: {captureProgress}%"></div>
+            </div>
+            <span class="capture-text">📸 Capturing...</span>
+          </div>
+        </div>
+      {/if}
+      
+      {#if showCaptureSuccess}
+        <div class="success-overlay">
+          <div class="success-indicator">
+            <div class="success-icon">✅</div>
+            <span class="success-text">Photo Captured!</span>
+          </div>
+        </div>
+      {/if}
+      
       <div class="camera-controls">
         <button 
           class="control-btn switch-camera"
@@ -1076,6 +1164,11 @@
           <span class="detection-count">
             {detectionResults.length} items detected
           </span>
+          {#if captureHistory.length > 0}
+            <button class="history-btn" on:click={showCaptureDetails}>
+              📷 {captureHistory.length}
+            </button>
+          {/if}
         </div>
       </div>
       
@@ -1263,6 +1356,269 @@
   .selected-indicator {
     color: #22c55e;
     font-weight: bold;
+  }
+  
+  .history-btn {
+    background: rgba(59, 130, 246, 0.9);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 4px 8px;
+    font-size: 12px;
+    margin-left: 8px;
+    cursor: pointer;
+  }
+  
+  .flash-overlay {
+    position: absolute;
+    inset: 0;
+    background: white;
+    animation: flash 0.2s ease-out;
+    pointer-events: none;
+    z-index: 20;
+  }
+  
+  @keyframes flash {
+    0% { opacity: 0; }
+    50% { opacity: 0.8; }
+    100% { opacity: 0; }
+  }
+  
+  .capture-overlay, .success-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 15;
+  }
+  
+  .capture-indicator, .success-indicator {
+    background: white;
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+  
+  .progress-ring {
+    width: 60px;
+    height: 60px;
+    border: 4px solid #e5e7eb;
+    border-radius: 50%;
+    position: relative;
+    margin: 0 auto 12px;
+  }
+  
+  .progress-fill {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 4px solid #22c55e;
+    border-top-color: transparent;
+    border-right-color: transparent;
+    transform: rotate(calc(var(--progress) * 3.6deg));
+    transition: transform 0.3s ease;
+  }
+  
+  .capture-text {
+    font-size: 14px;
+    color: #374151;
+    font-weight: 500;
+  }
+  
+  .success-icon {
+    font-size: 48px;
+    margin-bottom: 8px;
+  }
+  
+  .success-text {
+    font-size: 16px;
+    color: #22c55e;
+    font-weight: 600;
+  }
+  
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+  
+  .capture-modal {
+    background: white;
+    border-radius: 16px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  }
+  
+  .modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #111827;
+  }
+  
+  .close-modal {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #6b7280;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .modal-content {
+    padding: 20px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  
+  .capture-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 16px;
+    background: #f9fafb;
+    border-radius: 12px;
+  }
+  
+  .items-found {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  
+  .count {
+    font-size: 32px;
+    font-weight: bold;
+    color: #22c55e;
+  }
+  
+  .label {
+    font-size: 14px;
+    color: #6b7280;
+  }
+  
+  .timestamp {
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  
+  .detections-list {
+    space-y: 12px;
+  }
+  
+  .detection-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+  
+  .item-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  
+  .item-name {
+    font-weight: 500;
+    color: #111827;
+  }
+  
+  .item-category {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+  
+  .item-category.recycle {
+    background: #dcfce7;
+    color: #166534;
+  }
+  
+  .item-category.compost {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  
+  .item-category.landfill {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  
+  .item-confidence {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+  
+  .item-instructions {
+    font-size: 14px;
+    color: #4b5563;
+    line-height: 1.4;
+    padding: 8px;
+    background: #f9fafb;
+    border-radius: 6px;
+  }
+  
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    justify-content: center;
+  }
+  
+  .retake-btn, .clear-btn {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .retake-btn {
+    background: #3b82f6;
+    color: white;
+  }
+  
+  .retake-btn:hover {
+    background: #2563eb;
+  }
+  
+  .clear-btn {
+    background: #ef4444;
+    color: white;
+  }
+  
+  .clear-btn:hover {
+    background: #dc2626;
   }
   
   .control-btn {
@@ -1470,4 +1826,60 @@
       bottom: env(safe-area-inset-bottom, 16px);
     }
   }
-</style> 
+</style>
+
+<!-- Capture Preview Modal -->
+{#if showCapturePreview && lastCapturedPhoto}
+  <div class="modal-overlay" on:click={() => showCapturePreview = false}>
+    <div class="capture-modal" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>📸 Captured Photo Analysis</h3>
+        <button class="close-modal" on:click={() => showCapturePreview = false}>×</button>
+      </div>
+      
+      <div class="modal-content">
+        <div class="capture-summary">
+          <div class="items-found">
+            <span class="count">{lastCapturedPhoto.detections.length}</span>
+            <span class="label">Items Detected</span>
+          </div>
+          <div class="timestamp">
+            {new Date().toLocaleTimeString()}
+          </div>
+        </div>
+        
+        <div class="detections-list">
+          {#each lastCapturedPhoto.detections as detection}
+            <div class="detection-item">
+              <div class="item-info">
+                <span class="item-name">{detection.class}</span>
+                <span class="item-category" class:recycle={detection.category === 'recycle'} 
+                      class:compost={detection.category === 'compost'} 
+                      class:landfill={detection.category === 'landfill'}>
+                  {detection.category}
+                </span>
+              </div>
+              <div class="item-confidence">
+                {Math.round(detection.confidence * 100)}%
+              </div>
+              {#if detection.instructions}
+                <div class="item-instructions">
+                  {detection.instructions}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+        
+        <div class="modal-actions">
+          <button class="retake-btn" on:click={retakePhoto}>
+            🔄 Retake Photo
+          </button>
+          <button class="clear-btn" on:click={clearCaptureHistory}>
+            🗑️ Clear History
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if} 
