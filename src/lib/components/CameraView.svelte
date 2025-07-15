@@ -2216,6 +2216,10 @@
   // Low light check
   function isLowLight(data) { /* impl */ }
   if (isLowLight(capturedImage)) alert('Low light - try better lighting');
+  
+  // Blurry check
+  function isBlurry(data) { /* variance calc */ }
+  if (isBlurry(capturedImage)) alert('Blurry - hold steady');
 </script>
 
 <div class="camera-container">
