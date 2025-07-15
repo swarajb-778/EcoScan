@@ -1,50 +1,77 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { EnhancedDetector } from '../ml/enhanced-detector.js';
-  import { performanceOptimizer } from '../utils/performance-optimizer.js';
-  import { modelOptimizer } from '../utils/model-optimization.js';
-  import type { Detection } from '../types/index.js';
+  import { ObjectDetector } from '../ml/detector.js';
+  import { WasteClassifier } from '../ml/classifier.js';
+  import type { Detection, ModelConfig, CameraConfig } from '../types/index.js';
   
   export let isActive = false;
   export let onDetections: (detections: Detection[]) => void = () => {};
+  export let onCapturePhoto: (imageData: ImageData) => void = () => {};
   
   let videoElement: HTMLVideoElement;
   let canvasElement: HTMLCanvasElement;
+  let captureCanvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D;
   let stream: MediaStream | null = null;
-  let detector: EnhancedDetector;
+  let detector: ObjectDetector;
+  let classifier: WasteClassifier;
   let animationId: number;
   let isDetecting = false;
+  let isInitializing = false;
   let frameCount = 0;
   let detectionResults: Detection[] = [];
+  let lastFrameTime = 0;
+  let isCapturing = false;
+  
+  // Performance metrics
   let performanceMetrics = {
     fps: 0,
     inferenceTime: 0,
-    memoryUsage: 0
+    memoryUsage: 0,
+    cameraInitTime: 0
   };
   
-  // Enhanced camera settings
-  let cameraConfig = {
+  // Simplified camera configuration
+  let cameraConfig: CameraConfig = {
+    facingMode: 'environment',
     width: 640,
-    height: 640,
-    facingMode: 'environment' as 'user' | 'environment'
+    height: 640
+  };
+  
+  // Model configuration for reliable detection
+  const modelConfig: ModelConfig = {
+    modelPath: '/models/yolov8n.onnx',
+    inputSize: [640, 640],
+    threshold: 0.5,
+    iouThreshold: 0.4
   };
   
   onMount(async () => {
     try {
-      // Initialize enhanced detector with optimizations
-      detector = new EnhancedDetector();
-      await detector.initialize();
+      isInitializing = true;
+      console.log('🎥 Initializing camera system...');
       
-      // Initialize performance monitoring
-      await performanceOptimizer.initialize();
-      await modelOptimizer.initialize();
+      const initStartTime = performance.now();
+      
+      // Initialize reliable detector and classifier
+      detector = new ObjectDetector(modelConfig);
+      classifier = new WasteClassifier();
+      
+      await Promise.all([
+        detector.initialize(),
+        classifier.initialize()
+      ]);
+      
+      performanceMetrics.cameraInitTime = performance.now() - initStartTime;
+      console.log(`✅ Camera system initialized in ${performanceMetrics.cameraInitTime.toFixed(1)}ms`);
       
       if (isActive) {
         await startCamera();
       }
     } catch (error) {
-      console.error('Failed to initialize camera:', error);
+      console.error('❌ Failed to initialize camera system:', error);
+    } finally {
+      isInitializing = false;
     }
   });
   
@@ -58,12 +85,9 @@
   
   async function startCamera() {
     try {
-      const optimizationConfig = performanceOptimizer.getOptimizationConfig();
+      console.log('📹 Starting camera...');
       
-      // Use optimized resolution
-      cameraConfig.width = optimizationConfig.inputResolution[0];
-      cameraConfig.height = optimizationConfig.inputResolution[1];
-      
+      // Request camera access with optimal settings
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: cameraConfig.width },
@@ -72,20 +96,42 @@
         }
       });
       
-      videoElement.srcObject = stream;
-      videoElement.play();
+      if (!videoElement) {
+        throw new Error('Video element not available');
+      }
       
-      // Setup canvas context
+      videoElement.srcObject = stream;
+      await videoElement.play();
+      
+      // Setup canvas context for detection overlay
       ctx = canvasElement.getContext('2d')!;
       canvasElement.width = cameraConfig.width;
       canvasElement.height = cameraConfig.height;
+      
+      console.log('✅ Camera started successfully');
       
       // Start detection loop
       startDetectionLoop();
       
     } catch (error) {
-      console.error('Camera access failed:', error);
+      console.error('❌ Camera access failed:', error);
+      handleCameraError(error);
     }
+  }
+  
+  function handleCameraError(error: any) {
+    let errorMessage = 'Camera access failed';
+    
+    if (error.name === 'NotAllowedError') {
+      errorMessage = 'Camera permission denied. Please allow camera access.';
+    } else if (error.name === 'NotFoundError') {
+      errorMessage = 'No camera found. Please connect a camera.';
+    } else if (error.name === 'NotReadableError') {
+      errorMessage = 'Camera is being used by another application.';
+    }
+    
+    console.error('Camera error:', errorMessage);
+    // You could dispatch an error event here for the parent component
   }
   
   function stopCamera() {
@@ -109,47 +155,49 @@
       return;
     }
     
-    const startTime = performance.now();
+    const currentTime = performance.now();
     frameCount++;
     
+    // Simple frame rate limiting (aim for ~15 FPS for performance)
+    if (currentTime - lastFrameTime < 66) { // 66ms = ~15 FPS
+      animationId = requestAnimationFrame(detectFrame);
+      return;
+    }
+    
+    lastFrameTime = currentTime;
+    const startTime = performance.now();
+    
     try {
-      // Get optimization config for frame skipping
-      const config = performanceOptimizer.getOptimizationConfig();
-      
-      // Skip frames based on performance optimization
-      if (frameCount % (config.frameSkipping + 1) !== 0) {
-        animationId = requestAnimationFrame(detectFrame);
-        return;
-      }
-      
       // Draw video frame to canvas
       ctx.drawImage(videoElement, 0, 0, cameraConfig.width, cameraConfig.height);
       const imageData = ctx.getImageData(0, 0, cameraConfig.width, cameraConfig.height);
       
-      // Run enhanced detection
+      // Run detection with reliable ObjectDetector
       const detections = await detector.detect(imageData);
+      
+      // Enhance detections with classification
+      const enhancedDetections = detections.map(detection => {
+        const classification = classifier.classify(detection.class);
+        return {
+          ...detection,
+          category: classification?.category || detection.category,
+          confidence: Math.min(detection.confidence, classification?.confidence || detection.confidence),
+          instructions: classification?.instructions || detection.instructions
+        };
+      });
       
       // Update performance metrics
       const inferenceTime = performance.now() - startTime;
       performanceMetrics.inferenceTime = inferenceTime;
-      performanceMetrics.fps = 1000 / (performance.now() - startTime);
-      
-      // Update performance optimizer
-      performanceOptimizer.updateMetrics({
-        inferenceTime,
-        frameRate: performanceMetrics.fps
-      });
-      
-      // Check for performance optimization needs
-      await modelOptimizer.checkPerformanceAndOptimize();
+      performanceMetrics.fps = frameCount / ((currentTime - (frameCount * 66)) / 1000);
       
       // Filter detections based on confidence threshold
-      const filteredDetections = detections.filter(d => 
-        d.confidence >= config.confidenceThreshold
+      const filteredDetections = enhancedDetections.filter(d => 
+        d.confidence >= modelConfig.threshold
       );
       
-      // Limit number of detections
-      detectionResults = filteredDetections.slice(0, config.maxDetections);
+      // Limit number of detections for performance
+      detectionResults = filteredDetections.slice(0, 10);
       
       // Draw detection visualizations
       drawDetections(detectionResults);
@@ -158,7 +206,7 @@
       onDetections(detectionResults);
       
     } catch (error) {
-      console.error('Detection failed:', error);
+      console.error('❌ Detection failed:', error);
     }
     
     // Continue detection loop
@@ -217,28 +265,109 @@
   }
   
   function drawPerformanceOverlay() {
-    const config = performanceOptimizer.getOptimizationConfig();
-    const modelInfo = modelOptimizer.getModelInfo();
-    
-    // Performance metrics overlay
+    // Simplified performance metrics overlay
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(10, 10, 200, 120);
+    ctx.fillRect(10, 10, 180, 100);
     
     ctx.fillStyle = '#ffffff';
     ctx.font = '12px sans-serif';
     ctx.fillText(`FPS: ${performanceMetrics.fps.toFixed(1)}`, 15, 25);
     ctx.fillText(`Inference: ${performanceMetrics.inferenceTime.toFixed(1)}ms`, 15, 40);
-    ctx.fillText(`Model: ${modelInfo.currentModel || 'loading...'}`, 15, 55);
-    ctx.fillText(`Resolution: ${config.inputResolution[0]}x${config.inputResolution[1]}`, 15, 70);
-    ctx.fillText(`Skip: ${config.frameSkipping}`, 15, 85);
-    ctx.fillText(`Threshold: ${(config.confidenceThreshold * 100).toFixed(0)}%`, 15, 100);
-    ctx.fillText(`Memory: ${performanceMetrics.memoryUsage.toFixed(1)}MB`, 15, 115);
+    ctx.fillText(`Model: YOLOv8n`, 15, 55);
+    ctx.fillText(`Resolution: ${cameraConfig.width}x${cameraConfig.height}`, 15, 70);
+    ctx.fillText(`Threshold: ${(modelConfig.threshold * 100).toFixed(0)}%`, 15, 85);
   }
   
   function switchCamera() {
     cameraConfig.facingMode = cameraConfig.facingMode === 'environment' ? 'user' : 'environment';
     stopCamera();
     startCamera();
+  }
+  
+  // Photo capture functionality
+  async function capturePhoto() {
+    if (!videoElement || !ctx || isCapturing) return;
+    
+    isCapturing = true;
+    console.log('📸 Capturing photo...');
+    
+    try {
+      // Create capture canvas for photo analysis
+      if (!captureCanvas) {
+        captureCanvas = document.createElement('canvas');
+      }
+      
+      captureCanvas.width = cameraConfig.width;
+      captureCanvas.height = cameraConfig.height;
+      const captureCtx = captureCanvas.getContext('2d')!;
+      
+      // Capture current video frame
+      captureCtx.drawImage(videoElement, 0, 0, cameraConfig.width, cameraConfig.height);
+      const capturedImageData = captureCtx.getImageData(0, 0, cameraConfig.width, cameraConfig.height);
+      
+      // Stop live detection temporarily
+      const wasDetecting = isDetecting;
+      isDetecting = false;
+      
+      // Analyze the captured photo
+      await analyzePhoto(capturedImageData);
+      
+      // Notify parent component
+      onCapturePhoto(capturedImageData);
+      
+      // Resume live detection if it was running
+      if (wasDetecting) {
+        setTimeout(() => {
+          isDetecting = true;
+          detectFrame();
+        }, 1000); // Brief pause to show capture effect
+      }
+      
+      console.log('✅ Photo captured and analyzed');
+      
+    } catch (error) {
+      console.error('❌ Photo capture failed:', error);
+    } finally {
+      isCapturing = false;
+    }
+  }
+  
+  async function analyzePhoto(imageData: ImageData) {
+    if (!detector || !classifier) return;
+    
+    console.log('🔍 Analyzing captured photo...');
+    const startTime = performance.now();
+    
+    try {
+      // Run detection on captured image
+      const detections = await detector.detect(imageData);
+      
+      // Enhance detections with classification
+      const enhancedDetections = detections.map(detection => {
+        const classification = classifier.classify(detection.class);
+        return {
+          ...detection,
+          category: classification?.category || detection.category,
+          confidence: Math.min(detection.confidence, classification?.confidence || detection.confidence),
+          instructions: classification?.instructions || detection.instructions
+        };
+      });
+      
+      const analysisTime = performance.now() - startTime;
+      console.log(`✅ Photo analysis complete in ${analysisTime.toFixed(1)}ms - Found ${enhancedDetections.length} items`);
+      
+      // Update detection results with photo analysis
+      detectionResults = enhancedDetections.filter(d => d.confidence >= modelConfig.threshold);
+      
+      // Draw results on camera overlay
+      drawDetections(detectionResults);
+      
+      // Notify parent with results
+      onDetections(detectionResults);
+      
+    } catch (error) {
+      console.error('❌ Photo analysis failed:', error);
+    }
   }
   
   // Update performance metrics periodically
@@ -290,8 +419,23 @@
           class="control-btn switch-camera"
           on:click={switchCamera}
           aria-label="Switch camera"
+          disabled={isCapturing}
         >
-          📷
+          🔄
+        </button>
+        
+        <button 
+          class="capture-btn"
+          on:click={capturePhoto}
+          aria-label="Capture photo for analysis"
+          disabled={isCapturing || isInitializing}
+          class:capturing={isCapturing}
+        >
+          {#if isCapturing}
+            📷✨
+          {:else}
+            📸
+          {/if}
         </button>
         
         <div class="detection-info">
@@ -366,9 +510,54 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   }
   
-  .control-btn:hover {
+  .control-btn:hover:not(:disabled) {
     background: rgba(255, 255, 255, 1);
     transform: scale(1.05);
+  }
+  
+  .control-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .capture-btn {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+    border: 3px solid white;
+    font-size: 28px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .capture-btn:hover:not(:disabled) {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  }
+  
+  .capture-btn:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+  
+  .capture-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .capture-btn.capturing {
+    animation: capture-pulse 0.5s ease-in-out;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  }
+  
+  @keyframes capture-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
   }
   
   .detection-info {
