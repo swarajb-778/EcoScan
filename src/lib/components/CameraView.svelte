@@ -3076,6 +3076,7 @@
 {#if capturedDetections.length > 0}
   <div class='results-modal'>
     {#each capturedDetections as d}
+      <div aria-live='polite'>{d.class} in {d.category}</div>
       <div>{d.class}: {d.category} - Instructions: {d.instructions || 'Dispose in ' + d.category}</div>
     {/each}
   </div>
