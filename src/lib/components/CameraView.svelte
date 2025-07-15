@@ -2239,6 +2239,9 @@
   
   // Local storage
   localStorage.setItem('classifications', JSON.stringify(detections));
+  
+  // Browser check
+  if (!navigator.mediaDevices) alert('Browser not supported');
 </script>
 
 <div class="camera-container">
