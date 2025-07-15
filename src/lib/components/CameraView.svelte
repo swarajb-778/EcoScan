@@ -2251,6 +2251,9 @@
   
   // Performance tier
   detectPerformanceTier();
+  
+  // Fallback
+  if (cameraError) showUploadInterface();
 </script>
 
 <div class="camera-container">
