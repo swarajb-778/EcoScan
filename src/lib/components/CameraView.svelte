@@ -3090,6 +3090,8 @@
       <div>{d.class}: {d.category} - Instructions: {d.instructions || 'Dispose in ' + d.category}</div>
       // Voice
       speechSynthesis.speak(new SpeechSynthesisUtterance(`${d.class} to ${d.category}`));
+      // Low confidence
+      if (d.confidence < 0.5) prompt('Capture still for better analysis');
     {/each}
   </div>
 {/if> 
