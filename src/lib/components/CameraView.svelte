@@ -2212,6 +2212,10 @@
   
   // No camera fallback
   if (availableCameras.length === 0) showUploadPrompt();
+  
+  // Low light check
+  function isLowLight(data) { /* impl */ }
+  if (isLowLight(capturedImage)) alert('Low light - try better lighting');
 </script>
 
 <div class="camera-container">
