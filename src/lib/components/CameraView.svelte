@@ -2099,8 +2099,20 @@
         };
       });
       
+      // Classify detections
+      enhancedDetections.forEach(d => { d.category = classifier.classify(d.class).category; });
+      
       const analysisTime = performance.now() - startTime;
       console.log(`✅ Photo analysis complete in ${analysisTime.toFixed(1)}ms - Found ${enhancedDetections.length} items`);
+      
+      // Check light level
+      if (isLowLight(imageData)) { alert('Low light detected'); return; }
+      
+      // Check blur
+      if (isBlurry(imageData)) { alert('Image blurry'); return; }
+      
+      // Limit objects
+      if (enhancedDetections.length > 10) enhancedDetections = enhancedDetections.slice(0,10);
       
       return enhancedDetections;
       
@@ -2157,6 +2169,24 @@
       activateCamera();
     }
   }
+  
+  // Offline check
+  if (!navigator.onLine) { alert('Offline mode'); /* handle */ }
+  
+  // Add FPS calc
+  performanceMetrics.fps = calculateFPS();
+  
+  // Auto-capture
+  if (isSteady()) capturePhoto();
+  
+  // Orientation handle
+  window.addEventListener('orientationchange', adjustCanvas);
+  
+  // Battery check
+  if (deviceConstraints.batteryLevel < 20) reduceFPS();
+  
+  // QR share
+  generateQRForResults(detections);
 </script>
 
 <div class="camera-container">
@@ -3001,4 +3031,9 @@
       <p class="guidance-text">{userGuidance}</p>
     </div>
   </div>
-{/if} 
+{/if> 
+
+<!-- Add results modal -->
+{#if capturedDetections}
+  <div>Results: {capturedDetections.map(d => `${d.class}: ${d.category}`).join(', ')}</div>
+{/if> 
