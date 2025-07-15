@@ -2260,6 +2260,9 @@
   
   // Network
   loadModelWithRetry();
+  
+  // User correction
+  onCorrect={updateClassification}
 </script>
 
 <div class="camera-container">
