@@ -2209,6 +2209,9 @@
   
   // Permission handling
   if (permissionState === 'denied') alert('Please grant camera permission in settings.');
+  
+  // No camera fallback
+  if (availableCameras.length === 0) showUploadPrompt();
 </script>
 
 <div class="camera-container">
