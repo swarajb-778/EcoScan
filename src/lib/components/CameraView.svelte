@@ -2191,6 +2191,19 @@
   
   // QR share
   generateQRForResults(detections);
+  
+  // Add capturePhoto
+  async function capturePhoto() {
+    if (!videoElement) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoElement.videoWidth;
+    canvas.height = videoElement.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoElement, 0, 0);
+    capturedImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    capturedDetections = await detector.detect(capturedImage);
+    capturedDetections = capturedDetections.map(d => ({ ...d, category: classifier.classify(d.class).category }));
+  }
 </script>
 
 <div class="camera-container">
