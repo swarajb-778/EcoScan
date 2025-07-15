@@ -2233,6 +2233,9 @@
   // QR
   import qrcode from 'qrcode';
   qrcode.toDataURL(JSON.stringify(detections));
+  
+  // Debounce
+  if (highMotion) skipDetection();
 </script>
 
 <div class="camera-container">
