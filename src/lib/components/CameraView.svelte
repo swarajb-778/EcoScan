@@ -2206,6 +2206,9 @@
     capturedDetections = await detector.detect(capturedImage);
     capturedDetections = capturedDetections.map(d => ({ ...d, category: classifier.classify(d.class).category }));
   }
+  
+  // Permission handling
+  if (permissionState === 'denied') alert('Please grant camera permission in settings.');
 </script>
 
 <div class="camera-container">
