@@ -2245,6 +2245,9 @@
   
   // Language
   if (language !== 'en') loadTranslations();
+  
+  // Security
+  if (!isValidImageData(capturedImage)) throw Error('Invalid data');
 </script>
 
 <div class="camera-container">
