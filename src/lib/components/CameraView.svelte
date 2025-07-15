@@ -2257,6 +2257,9 @@
   
   // Keyboard
   onKeydown={e => if (e.key === 'c') capturePhoto();}
+  
+  // Network
+  loadModelWithRetry();
 </script>
 
 <div class="camera-container">
