@@ -2242,6 +2242,9 @@
   
   // Browser check
   if (!navigator.mediaDevices) alert('Browser not supported');
+  
+  // Language
+  if (language !== 'en') loadTranslations();
 </script>
 
 <div class="camera-container">
