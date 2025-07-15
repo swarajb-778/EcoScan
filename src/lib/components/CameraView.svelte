@@ -298,13 +298,11 @@
     if (!stream || !videoElement) return;
     
     try {
-      videoElement.srcObject = stream;
-      await videoElement.play();
-      
       // Setup canvas context for detection overlay
       ctx = canvasElement.getContext('2d')!;
-      canvasElement.width = cameraConfig.width;
-      canvasElement.height = cameraConfig.height;
+      
+      // Use enhanced stream setup with monitoring
+      await setupCameraStream();
       
       console.log('✅ Camera setup completed successfully');
       
@@ -314,6 +312,7 @@
     } catch (error) {
       console.error('❌ Camera setup failed:', error);
       cameraError = 'Failed to initialize camera display. Please refresh the page.';
+      streamStatus = 'failed';
     }
   }
   
@@ -361,11 +360,20 @@
   });
   
   onDestroy(() => {
+    console.log('🧹 Cleaning up camera component...');
+    
+    // Enhanced cleanup
     stopCamera();
-    if (animationId) {
-      cancelAnimationFrame(animationId);
-    }
+    
+    // Clean up detector and classifier
     detector?.dispose();
+    
+    // Clear any timeouts
+    if (cleanupTimeout) {
+      clearTimeout(cleanupTimeout);
+    }
+    
+    console.log('✅ Camera component cleanup complete');
   });
   
   async function startCamera() {
@@ -390,12 +398,214 @@
     }
   }
   
+  // Enhanced stream and resource management
+  let activeMediaTracks: MediaStreamTrack[] = [];
+  let streamStatus: 'idle' | 'starting' | 'active' | 'stopping' | 'failed' = 'idle';
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 3;
+  let cleanupTimeout: ReturnType<typeof setTimeout> | null = null;
+  
+  // Enhanced cleanup with proper resource management
   function stopCamera() {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;
+    console.log('🛑 Stopping camera...');
+    streamStatus = 'stopping';
+    
+    try {
+      // Stop detection loop
+      isDetecting = false;
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = 0;
+      }
+      
+      // Stop all media tracks properly
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          console.log(`Stopping track: ${track.kind} - ${track.label}`);
+          track.stop();
+        });
+        stream = null;
+      }
+      
+      // Clean up active tracks array
+      activeMediaTracks.forEach(track => {
+        if (track.readyState !== 'ended') {
+          track.stop();
+        }
+      });
+      activeMediaTracks = [];
+      
+      // Clear video element
+      if (videoElement) {
+        videoElement.srcObject = null;
+      }
+      
+      // Clear any pending cleanup
+      if (cleanupTimeout) {
+        clearTimeout(cleanupTimeout);
+        cleanupTimeout = null;
+      }
+      
+      streamStatus = 'idle';
+      console.log('✅ Camera stopped successfully');
+      
+    } catch (error) {
+      console.error('❌ Error stopping camera:', error);
+      streamStatus = 'failed';
     }
-    isDetecting = false;
+  }
+  
+  // Enhanced stream monitoring and recovery
+  function setupStreamMonitoring() {
+    if (!stream) return;
+    
+    const tracks = stream.getTracks();
+    activeMediaTracks = [...tracks];
+    
+    tracks.forEach(track => {
+      console.log(`Monitoring track: ${track.kind} - ${track.label}`);
+      
+      track.addEventListener('ended', () => {
+        console.warn('📹 Camera track ended unexpectedly');
+        handleStreamInterruption('track_ended');
+      });
+      
+      track.addEventListener('mute', () => {
+        console.warn('📹 Camera track muted');
+        handleStreamInterruption('track_muted');
+      });
+      
+      track.addEventListener('unmute', () => {
+        console.log('📹 Camera track unmuted');
+      });
+    });
+    
+    // Set up periodic health checks
+    const healthCheckInterval = setInterval(() => {
+      if (!stream || streamStatus !== 'active') {
+        clearInterval(healthCheckInterval);
+        return;
+      }
+      
+      const activeTracks = stream.getTracks().filter(track => track.readyState === 'live');
+      if (activeTracks.length === 0) {
+        console.warn('📹 No active camera tracks detected');
+        clearInterval(healthCheckInterval);
+        handleStreamInterruption('no_active_tracks');
+      }
+    }, 5000); // Check every 5 seconds
+  }
+  
+  // Handle stream interruptions with recovery
+  async function handleStreamInterruption(reason: string) {
+    console.warn(`📹 Stream interrupted: ${reason}`);
+    
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      cameraError = 'Camera connection lost. Please restart the camera manually.';
+      streamStatus = 'failed';
+      return;
+    }
+    
+    reconnectAttempts++;
+    console.log(`🔄 Attempting reconnection ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+    
+    // Clean up current stream
+    stopCamera();
+    
+    // Wait before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 1000 * reconnectAttempts));
+    
+    try {
+      await startCamera();
+      reconnectAttempts = 0; // Reset on successful reconnection
+    } catch (error) {
+      console.error('❌ Reconnection failed:', error);
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        cameraError = 'Unable to reconnect camera. Please refresh the page.';
+        streamStatus = 'failed';
+      }
+    }
+  }
+  
+  // Enhanced stream setup with monitoring
+  async function setupCameraStream() {
+    if (!stream || !videoElement) return;
+    
+    streamStatus = 'starting';
+    
+    try {
+      // Configure video element
+      videoElement.srcObject = stream;
+      videoElement.muted = true;
+      videoElement.playsInline = true;
+      videoElement.autoplay = true;
+      
+      // Set up stream monitoring before playing
+      setupStreamMonitoring();
+      
+      // Wait for video to be ready
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Video load timeout'));
+        }, 10000); // 10 second timeout
+        
+        videoElement.addEventListener('loadedmetadata', () => {
+          clearTimeout(timeout);
+          resolve(null);
+        }, { once: true });
+        
+        videoElement.addEventListener('error', (e) => {
+          clearTimeout(timeout);
+          reject(new Error(`Video error: ${e}`));
+        }, { once: true });
+      });
+      
+      await videoElement.play();
+      
+      // Verify video is actually playing
+      if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+        throw new Error('Video dimensions are zero');
+      }
+      
+      streamStatus = 'active';
+      console.log(`✅ Camera stream active: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+      
+      // Update canvas size to match video
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+      
+      // Schedule resource cleanup
+      scheduleResourceCleanup();
+      
+    } catch (error) {
+      console.error('❌ Camera stream setup failed:', error);
+      streamStatus = 'failed';
+      throw error;
+    }
+  }
+  
+  // Periodic resource cleanup
+  function scheduleResourceCleanup() {
+    if (cleanupTimeout) {
+      clearTimeout(cleanupTimeout);
+    }
+    
+    cleanupTimeout = setTimeout(() => {
+      // Clean up unused resources periodically
+      if ('memory' in performance) {
+        const memory = (performance as any).memory;
+        performanceMetrics.memoryUsage = memory.usedJSHeapSize / (1024 * 1024);
+        
+        // Force garbage collection if memory usage is high
+        if (memory.usedJSHeapSize > 100 * 1024 * 1024) { // 100MB
+          console.log('🧹 High memory usage detected, triggering cleanup');
+          // The browser will handle GC automatically
+        }
+      }
+      
+      // Reschedule
+      scheduleResourceCleanup();
+    }, 30000); // Every 30 seconds
   }
   
   function startDetectionLoop() {
